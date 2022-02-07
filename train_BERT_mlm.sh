@@ -1,0 +1,15 @@
+python run_BERT_pretraining_mlm.py \
+    --dataset_name wikitext \
+    --dataset_config_name wikitext-2-raw-v1 \
+    --validation_split_percentage 5 \
+    --pad_to_max_length \
+    --tokenizer_name ./myBERTTokenizerFast \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 8 \
+    --learning_rate 5e-5\
+    --weight_decay 0.0 \
+    --num_train_epochs 3 \
+    --lr_scheduler_type linear \
+    --output_dir ./myBERTsample \
+    --max_seq_length 512 \
+    --mlm_probability 0.15
