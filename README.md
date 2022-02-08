@@ -14,7 +14,7 @@
 
 #### To start the full-fledged training on the Bookcorpus and Wikipedia combined, set the following attribute(s) in both the shell scripts mentioned above
 - set the attribute `--dataset_name` to `kowndinya23/bert-corpus`
-- REMOVE the attribute `--dataset_config_name` or equivalently set it to `None`
+- REMOVE the attribute `--dataset_config_name`
 
 ### Note
 - If running the BERT training on a TPU, it is better to pass the flag `--pad_to_max_length` in `run_BERT_pretraining_mlm.py` since dynamic padding slows down a TPU
