@@ -1,5 +1,4 @@
 tqdm
-transformers
 sentencepiece
 accelerate
 datasets
