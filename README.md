@@ -13,7 +13,7 @@
  - set the attribute `--dataset_config_name` to `wikitext-2-raw-v1`
 
 #### To start the full-fledged training on the Bookcorpus and Wikipedia combined, set the following attribute(s) in both the shell scripts mentioned above
-- set the attribute `--dataset_name` to `kowndinya23/bert-corpus`
+- set the attribute `--dataset_name` to `kowndinya23/bert-dataset`
 - REMOVE the attribute `--dataset_config_name`
 
 ### Note
