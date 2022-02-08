@@ -6,7 +6,7 @@
 - First run `./train_BERT_tokenizer.sh` to train a tokenizer on the dataset
 - Then run `./train_BERT_mlm.sh` to pre-train BERT on the dataset
 
-**Note that all the optional parameters correspond to the *bert-base-uncased* version of huggingface library**
+**Note that all the default parameters correspond to the *bert-base-uncased* version of huggingface library**
 
 #### To test the working of code on a sample dataset, set the following attribute(s) in both the shell scripts mentioned above
  - set the attribute `--dataset_name` to `wikitext`
