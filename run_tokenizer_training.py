@@ -1,10 +1,8 @@
 import argparse
-import torch
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 
 import transformers
 from transformers import BertTokenizerFast
-
 from tokenizers import(
     decoders,
     models,
@@ -12,11 +10,22 @@ from tokenizers import(
     pre_tokenizers,
     processors,
     trainers,
-    Tokenizer
+    Tokenizer,
 )
 
 def parse_args():
-    parser=argparse.ArgumentParser(description="Train a BertFastTokenizer using WordPiece algorithm, on a dataset (via the datasets library)")
+    parser=argparse.ArgumentParser(description="Train a BertTokenizerFast using WordPiece algorithm, on a dataset")
+    parser.add_argument(
+        "--load_data_from_disk",
+        action="store_true",
+        help="If passed, the dataset is loaded from the disk."
+    )
+    parser.add_argument(
+        "--data_directory",
+        type=str,
+        default=None,
+        help="The path to the directory in which dataset is present in the disk."
+    )
     parser.add_argument(
         "--dataset_name",
         type=str,
@@ -43,15 +52,20 @@ def parse_args():
     )
     parser.add_argument("--output_dir", type=str, default=None, help="Where to store the final tokenizer.")
 
-
     args=parser.parse_args()
     return args
+
 
 def main():
     args=parse_args()
 
-    dataset=load_dataset(args.dataset_name, args.dataset_config_name)
-    dataset=dataset['train']
+    if args.load_data_from_disk:
+        if args.data_directory is not None:
+            dataset=load_from_disk(args.data_directory)
+    else:
+        dataset=load_dataset(args.dataset_name, args.dataset_config_name)
+        
+    dataset=dataset["train"]
     column_names=dataset.column_names
     text_column_name="text" if "text" in column_names else column_names[0]
 
