@@ -4,7 +4,6 @@ import math
 import os
 import random
 import datasets
-import defusedxml
 import torch
 from torch.optim import AdamW
 from datasets import load_dataset, load_from_disk

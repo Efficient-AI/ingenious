@@ -14,6 +14,7 @@ python3 run_language_modeling.py \
     --validation_split_percentage 5\
     --tokenizer_name ./MyBertTokenizerFast\
     --vocab_size 25000\
+    --preprocess_batch_size 1000
     --per_device_train_batch_size 8\
     --per_device_eval_batch_size 8\
     --learning_rate 5e-5\

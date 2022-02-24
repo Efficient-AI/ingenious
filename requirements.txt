@@ -2,3 +2,5 @@ tqdm
 sentencepiece
 accelerate
 datasets
+tokenizers
+torch
