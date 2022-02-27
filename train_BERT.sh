@@ -1,4 +1,4 @@
-python3 run_language_modeling.py \
+accelerate launch run_language_modeling.py \
     --load_data_from_disk \
     --data_directory ./bert_dataset\
     --validation_split_percentage 5\

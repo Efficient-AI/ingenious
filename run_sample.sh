@@ -8,13 +8,13 @@ python3 run_tokenizer_training.py \
     --output_dir MyBertTokenizerFast
 
 
-python3 run_language_modeling.py \
+accelerate launch run_language_modeling.py \
     --load_data_from_disk \
     --data_directory wikitext-2-raw-v1\
     --validation_split_percentage 5\
     --tokenizer_name ./MyBertTokenizerFast\
     --vocab_size 25000\
-    --preprocess_batch_size 1000
+    --preprocess_batch_size 1000\
     --per_device_train_batch_size 8\
     --per_device_eval_batch_size 8\
     --learning_rate 5e-5\
