@@ -7,7 +7,7 @@ Run `accelerate config` and answer the following questions
 An example is given below
 - In which compute environment are you running? ([0] This machine, [1] AWS (Amazon SageMaker)): **0**
 - Which type of machine are you using? ([0] No distributed training, [1] multi-CPU, [2] multi-GPU, [3] TPU): **2**
-- How many different machines will you use (use more than 1 for multi-node training)? [1]: **0**
+- How many different machines will you use (use more than 1 for multi-node training)? [1]: **1**
 - Do you want to use DeepSpeed? [yes/NO]: **NO**
 - How many processes in total will you use? [1]: **8**
 - Do you wish to use FP16 (mixed precision)? [yes/NO]: **yes**
