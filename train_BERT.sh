@@ -5,8 +5,8 @@ accelerate launch run_language_modeling.py \
     --tokenizer_name ./MyBertTokenizerFast\
     --vocab_size 30000\
     --preprocess_batch_size 1000\
-    --per_device_train_batch_size 256\
-    --per_device_eval_batch_size 256\
+    --per_device_train_batch_size 8\
+    --per_device_eval_batch_size 8\
     --learning_rate 1e-4\
     --weight_decay 0.01\
     --max_train_steps 100000\

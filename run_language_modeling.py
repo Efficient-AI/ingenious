@@ -160,7 +160,7 @@ def parse_args():
         help="The number of processes to use for the preprocessing.",
     )
     parser.add_argument(
-        "preprocess_batch_size",
+        "--preprocess_batch_size",
         type=int,
         default=None,
         help="batch size during preprocessing"
