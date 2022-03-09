@@ -404,9 +404,11 @@ class FlaxWav2Vec2FeatureEncoder(nn.Module):
     def setup(self):
         self.conv_layers = FlaxConvLayersCollection(self.config, dtype=self.dtype)
 
-    def __call__(self, input_values):
+    def __call__(self, input_values, freeze_feature_encoder=False):
         hidden_states = input_values[:, :, None]
         hidden_states = self.conv_layers(hidden_states)
+        if freeze_feature_encoder:
+            hidden_states = jax.lax.stop_gradient(hidden_states)
         return hidden_states
 
 
@@ -766,6 +768,73 @@ class FlaxWav2Vec2GumbelVectorQuantizer(nn.Module):
         return codevectors, perplexity
 
 
+class FlaxWav2Vec2Adapter(nn.Module):
+    config: Wav2Vec2Config
+    dtype: jnp.dtype = jnp.float32
+
+    def setup(self):
+        # hidden_states require down-projection if feature dims don't match
+        if self.config.output_hidden_size != self.config.hidden_size:
+            self.proj = nn.Dense(
+                self.config.output_hidden_size,
+                kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
+                dtype=self.dtype,
+            )
+            self.proj_layer_norm = nn.LayerNorm(epsilon=self.config.layer_norm_eps, dtype=self.dtype)
+        else:
+            self.proj = self.proj_layer_norm = None
+
+        self.layers = FlaxWav2Vec2AdapterLayersCollection(self.config, dtype=self.dtype)
+
+    def __call__(self, hidden_states, deterministic=True):
+        # down-project hidden_states if required
+        if self.proj is not None and self.proj_layer_norm is not None:
+            hidden_states = self.proj(hidden_states)
+            hidden_states = self.proj_layer_norm(hidden_states)
+
+        hidden_states = self.layers(hidden_states)
+
+        return hidden_states
+
+
+class FlaxWav2Vec2AdapterLayer(nn.Module):
+    config: Wav2Vec2Config
+    dtype: jnp.dtype = jnp.float32
+
+    def setup(self):
+        self.conv = nn.Conv(
+            features=2 * self.config.output_hidden_size,
+            kernel_size=(self.config.adapter_kernel_size,),
+            strides=(self.config.adapter_stride,),
+            padding=((1, 1),),
+            kernel_init=jax.nn.initializers.normal(self.config.initializer_range),
+            dtype=self.dtype,
+        )
+
+    def __call__(self, hidden_states):
+        hidden_states = self.conv(hidden_states)
+        hidden_states = nn.glu(hidden_states, axis=2)
+
+        return hidden_states
+
+
+class FlaxWav2Vec2AdapterLayersCollection(nn.Module):
+    config: Wav2Vec2Config
+    dtype: jnp.dtype = jnp.float32
+
+    def setup(self):
+        self.layers = [
+            FlaxWav2Vec2AdapterLayer(self.config, name=str(i), dtype=self.dtype)
+            for i in range(self.config.num_adapter_layers)
+        ]
+
+    def __call__(self, hidden_states):
+        for conv_layer in self.layers:
+            hidden_states = conv_layer(hidden_states)
+
+        return hidden_states
+
+
 class FlaxWav2Vec2PreTrainedModel(FlaxPreTrainedModel):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
@@ -808,6 +877,7 @@ class FlaxWav2Vec2PreTrainedModel(FlaxPreTrainedModel):
         train: bool = False,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
+        freeze_feature_encoder: bool = False,
         return_dict: Optional[bool] = None,
     ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -836,11 +906,14 @@ class FlaxWav2Vec2PreTrainedModel(FlaxPreTrainedModel):
             not train,
             output_attentions,
             output_hidden_states,
+            freeze_feature_encoder,
             return_dict,
             rngs=rngs,
         )
 
-    def _get_feat_extract_output_lengths(self, input_lengths: Union[jnp.ndarray, int]):
+    def _get_feat_extract_output_lengths(
+        self, input_lengths: Union[jnp.ndarray, int], add_adapter: Optional[bool] = None
+    ):
         return self.module._get_feat_extract_output_lengths(input_lengths)
 
 
@@ -860,6 +933,8 @@ class FlaxWav2Vec2Module(nn.Module):
         else:
             raise NotImplementedError("``config.do_stable_layer_norm is False`` is currently not supported.")
 
+        self.adapter = FlaxWav2Vec2Adapter(self.config, dtype=self.dtype) if self.config.add_adapter else None
+
     def __call__(
         self,
         input_values,
@@ -868,9 +943,10 @@ class FlaxWav2Vec2Module(nn.Module):
         deterministic=True,
         output_attentions=None,
         output_hidden_states=None,
+        freeze_feature_encoder=False,
         return_dict=None,
     ):
-        extract_features = self.feature_extractor(input_values)
+        extract_features = self.feature_extractor(input_values, freeze_feature_encoder=freeze_feature_encoder)
 
         # make sure that no loss is computed on padded inputs
         if attention_mask is not None:
@@ -905,6 +981,9 @@ class FlaxWav2Vec2Module(nn.Module):
 
         hidden_states = encoder_outputs[0]
 
+        if self.adapter is not None:
+            hidden_states = self.adapter(hidden_states)
+
         if not return_dict:
             return (hidden_states, extract_features) + encoder_outputs[1:]
 
@@ -915,10 +994,14 @@ class FlaxWav2Vec2Module(nn.Module):
             attentions=encoder_outputs.attentions,
         )
 
-    def _get_feat_extract_output_lengths(self, input_lengths: Union[jnp.ndarray, int]):
+    def _get_feat_extract_output_lengths(
+        self, input_lengths: Union[jnp.ndarray, int], add_adapter: Optional[bool] = None
+    ):
         """
         Computes the output length of the convolutional layers
         """
+
+        add_adapter = self.config.add_adapter if add_adapter is None else add_adapter
 
         def _conv_out_length(input_length, kernel_size, stride):
             # 1D convolutional layer output length formula taken
@@ -928,7 +1011,31 @@ class FlaxWav2Vec2Module(nn.Module):
         for kernel_size, stride in zip(self.config.conv_kernel, self.config.conv_stride):
             input_lengths = _conv_out_length(input_lengths, kernel_size, stride)
 
+        if add_adapter:
+            for _ in range(self.config.num_adapter_layers):
+                input_lengths = _conv_out_length(input_lengths, 1, self.config.adapter_stride)
+
         return input_lengths
+
+    def _get_feature_vector_attention_mask(
+        self, feature_vector_length: int, attention_mask: jnp.ndarray, add_adapter=None
+    ):
+
+        # Effectively attention_mask.sum(-1), but not inplace to be able to run
+        # on inference mode.
+        non_padded_lengths = attention_mask.cumsum(axis=-1)[:, -1]
+
+        output_lengths = self._get_feat_extract_output_lengths(non_padded_lengths, add_adapter=add_adapter)
+
+        batch_size = attention_mask.shape[0]
+
+        attention_mask = jnp.zeros((batch_size, feature_vector_length), dtype=attention_mask.dtype)
+        # these two operations makes sure that all values before the output lengths idxs are attended to
+        attention_mask = attention_mask.at[(jnp.arange(attention_mask.shape[0]), output_lengths - 1)].set(1)
+        attention_mask = jnp.flip(jnp.flip(attention_mask, axis=-1).cumsum(axis=-1), axis=-1)
+
+        attention_mask = jnp.array(attention_mask, dtype=bool)
+        return attention_mask
 
 
 @add_start_docstrings(
@@ -999,6 +1106,7 @@ class FlaxWav2Vec2ForCTCModule(nn.Module):
         deterministic=True,
         output_attentions=None,
         output_hidden_states=None,
+        freeze_feature_encoder=False,
         return_dict=None,
     ):
         outputs = self.wav2vec2(
@@ -1008,6 +1116,7 @@ class FlaxWav2Vec2ForCTCModule(nn.Module):
             deterministic=deterministic,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            freeze_feature_encoder=freeze_feature_encoder,
             return_dict=return_dict,
         )
 
@@ -1021,10 +1130,16 @@ class FlaxWav2Vec2ForCTCModule(nn.Module):
 
         return FlaxCausalLMOutput(logits=logits, hidden_states=outputs.hidden_states, attentions=outputs.attentions)
 
-    def _get_feat_extract_output_lengths(self, input_lengths: Union[jnp.ndarray, int]):
+    def _get_feat_extract_output_lengths(
+        self,
+        input_lengths: Union[jnp.ndarray, int],
+        add_adapter: Optional[bool] = None,
+    ):
         """
         Computes the output length of the convolutional layers
         """
+
+        add_adapter = self.config.add_adapter if add_adapter is None else add_adapter
 
         def _conv_out_length(input_length, kernel_size, stride):
             # 1D convolutional layer output length formula taken
@@ -1033,6 +1148,10 @@ class FlaxWav2Vec2ForCTCModule(nn.Module):
 
         for kernel_size, stride in zip(self.config.conv_kernel, self.config.conv_stride):
             input_lengths = _conv_out_length(input_lengths, kernel_size, stride)
+
+        if add_adapter:
+            for _ in range(self.config.num_adapter_layers):
+                input_lengths = _conv_out_length(input_lengths, 1, self.config.adapter_stride)
 
         return input_lengths
 
@@ -1087,10 +1206,6 @@ overwrite_call_docstring(
 append_replace_return_docstrings(FlaxWav2Vec2ForCTC, output_type=FlaxCausalLMOutput, config_class=Wav2Vec2Config)
 
 
-class FlaxWav2Vec2ForCTCModule(nn.Module):
-    config: Wav2Vec2Config
-
-
 class FlaxWav2Vec2ForPreTrainingModule(nn.Module):
     config: Wav2Vec2Config
     dtype: jnp.dtype = jnp.float32
@@ -1120,6 +1235,7 @@ class FlaxWav2Vec2ForPreTrainingModule(nn.Module):
         deterministic: bool = True,
         output_attentions=None,
         output_hidden_states=None,
+        freeze_feature_enocder=False,
         return_dict=None,
     ):
         r"""
@@ -1140,6 +1256,7 @@ class FlaxWav2Vec2ForPreTrainingModule(nn.Module):
             output_hidden_states=output_hidden_states,
             mask_time_indices=mask_time_indices,
             deterministic=deterministic,
+            freeze_feature_encoder=freeze_feature_enocder,
             return_dict=return_dict,
         )
 
@@ -1198,6 +1315,7 @@ class FlaxWav2Vec2ForPreTraining(FlaxWav2Vec2PreTrainedModel):
         train: bool = False,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
+        freeze_feature_encoder: bool = False,
         return_dict: Optional[bool] = None,
     ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1230,6 +1348,7 @@ class FlaxWav2Vec2ForPreTraining(FlaxWav2Vec2PreTrainedModel):
             not train,
             output_attentions,
             output_hidden_states,
+            freeze_feature_encoder,
             return_dict,
             rngs=rngs,
         )
@@ -1286,7 +1405,3 @@ overwrite_call_docstring(
 append_replace_return_docstrings(
     FlaxWav2Vec2ForPreTraining, output_type=FlaxWav2Vec2ForPreTrainingOutput, config_class=Wav2Vec2Config
 )
-
-
-class FlaxWav2Vec2ForCTCModule(nn.Module):
-    config: Wav2Vec2Config

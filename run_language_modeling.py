@@ -29,6 +29,12 @@ require_version("datasets>=1.8.0", "To fix: pip install -r requirements.txt")
 def parse_args():
     parser=argparse.ArgumentParser(description="Train a language model on Masked Language Modeling and Next Sentence Prediction tasks")
     parser.add_argument(
+        "--log_file",
+        type=str,
+        required=True,
+        help="The path to the file into which logs should be written"
+    )
+    parser.add_argument(
         "--load_data_from_disk",
         action="store_true",
         help="If passed, the dataset is loaded from the disk."
@@ -190,6 +196,8 @@ def main():
     accelerator=Accelerator()
     # Make one log on every process with the configuration for debugging
     logging.basicConfig(
+        filename=args.log_file,
+        filemode="w",
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
@@ -215,7 +223,7 @@ def main():
             os.makedirs(args.output_dir, exist_ok=True)
     accelerator.wait_for_everyone()
 
-    if args.load_data_from_disk:
+    if args.load_data_from_disk is not None:
         if args.data_directory is not None:
             raw_datasets=load_from_disk(args.data_directory)
             if "validation" not in raw_datasets.keys():

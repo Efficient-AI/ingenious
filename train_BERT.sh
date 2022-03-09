@@ -1,8 +1,8 @@
 accelerate launch run_language_modeling.py \
+    --log_file ./logs/log_bert_9thMar_0.log \
     --load_data_from_disk \
     --data_directory ./bert_dataset\
-    --validation_split_percentage 5\
-    --tokenizer_name ./MyBertTokenizerFast\
+    --tokenizer_name bert-base-uncased\
     --vocab_size 30000\
     --preprocess_batch_size 1000\
     --per_device_train_batch_size 8\
@@ -12,7 +12,7 @@ accelerate launch run_language_modeling.py \
     --max_train_steps 100000\
     --gradient_accumulation_steps 1\
     --num_warmup_steps 0\
-    --output_dir MyBERT\
+    --output_dir ./models/model_bert_9thMar_0/ \
     --max_seq_length 128\
     --preprocessing_num_workers 8\
     --mlm_probability 0.15\
