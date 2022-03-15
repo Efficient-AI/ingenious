@@ -1,7 +1,6 @@
 import argparse
 from datasets import load_dataset, load_from_disk
 
-import transformers
 from transformers import BertTokenizerFast
 from tokenizers import(
     decoders,

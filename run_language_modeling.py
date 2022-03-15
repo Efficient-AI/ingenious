@@ -566,6 +566,13 @@ def main():
     progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
 
+    if accelerator.is_main_process:
+        if args.output_dir is not None:
+            for i in range(args.num_train_epochs):
+                dir_path=args.output_dir + "/model_checkpoint_epoch_{}".format(i+1)
+                os.makedirs(dir_path, exist_ok=True)
+    accelerator.wait_for_everyone()
+
     for epoch in range(args.num_train_epochs):
         model.train()
         for step, batch in enumerate(train_dataloader):
@@ -605,16 +612,18 @@ def main():
             if args.output_dir is not None:
                 accelerator.wait_for_everyone()
                 unwrapped_model=accelerator.unwrap_model(model)
-                unwrapped_model.save_pretrained(args.output_dir, save_function=accelerator.save)
+                dir_path=args.output_dir+"/model_checkpoint_epoch_{}".format(epoch+1)
+                unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
                 if accelerator.is_main_process:
-                    tokenizer.save_pretrained(args.output_dir)
+                    tokenizer.save_pretrained(dir_path)
     
     if args.output_dir is not None:
         accelerator.wait_for_everyone()
         unwrapped_model=accelerator.unwrap_model(model)
-        unwrapped_model.save_pretrained(args.output_dir, save_function=accelerator.save)
+        dir_path=args.output_dir+"/model_checkpoint_epoch_{}".format(args.num_train_epochs)
+        unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
         if accelerator.is_main_process:
-            tokenizer.save_pretrained(args.output_dir)
+            tokenizer.save_pretrained(dir_path)
 
 if __name__=="__main__":
     main()

@@ -22,7 +22,7 @@ def main():
     bookcorpus=datasets.concatenate_datasets([bookcorpus1, bookcorpus2])
     wiki=datasets.load_dataset("wikipedia", "20200501.en", split="train")
     wiki=wiki.remove_columns(['title'])
-    bert_dataset=datasets.concatenate_datasets([bookcorpus, wiki])
+    bert_dataset=datasets.concatenate_datasets([wiki, bookcorpus])
     bert_dataset=bert_dataset.train_test_split(test_size=args.validation_split_percentage/100, shuffle=False)
     bert_dataset=datasets.DatasetDict({"train":bert_dataset["train"], "validation": bert_dataset["test"]})
     bert_dataset.save_to_disk("./bert_dataset/")
