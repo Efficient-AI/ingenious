@@ -5,8 +5,8 @@ accelerate launch run_language_modeling.py \
     --tokenizer_name bert-base-uncased\
     --vocab_size 30522\
     --preprocess_batch_size 1000\
-    --per_device_train_batch_size 8\
-    --per_device_eval_batch_size 8\
+    --per_device_train_batch_size 32\
+    --per_device_eval_batch_size 32\
     --learning_rate 1e-4\
     --weight_decay 0.01\
     --max_train_steps 1000000\
@@ -14,7 +14,7 @@ accelerate launch run_language_modeling.py \
     --num_warmup_steps 0\
     --output_dir ./models/model_bert_16thMar_0/ \
     --max_seq_length 128\
-    --preprocessing_num_workers 8\
+    --preprocessing_num_workers 32\
     --mlm_probability 0.15\
     --short_seq_prob 0.1\
     --nsp_probability 0.5
