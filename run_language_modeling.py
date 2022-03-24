@@ -224,6 +224,7 @@ def main():
             os.makedirs(args.output_dir, exist_ok=True)
     accelerator.wait_for_everyone()
 
+    logger.info(f"Loading the data.")
     if args.load_data_from_disk is not None:
         if args.data_directory is not None:
             raw_datasets=load_from_disk(args.data_directory)
@@ -248,7 +249,7 @@ def main():
         if "validation" not in raw_datasets.keys():
             raw_datasets=raw_datasets["train"].train_test_split(test_size=(args.validation_split_percentage/100), shuffle=False)
             raw_datasets=datasets.DatasetDict({"train": raw_datasets["train"], "validation": raw_datasets["test"]})
-    
+    logger.info(f"Loading the model configuration.")
     if args.config_name:
         config=BertConfig.from_pretrained(args.config_name)
     elif args.model_name_or_path:
@@ -269,7 +270,7 @@ def main():
             layer_norm_eps=1e-12,
             position_embedding_type="absolute",
         )
-    
+    logger.info(f"Loading the tokenizer.")
     if args.tokenizer_name:
         tokenizer=BertTokenizerFast.from_pretrained(args.tokenizer_name, use_fast=not args.use_slow_tokenizer)
     elif args.model_name_or_path:
@@ -279,7 +280,7 @@ def main():
             "You are instantiating a new tokenizer from scratch. This is not supported by this script."
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
-
+    logger.info(f"Initializing Model.")
     if args.model_name_or_path:
         model=BertForPreTraining.from_pretrained(
             args.model_name_or_path,
@@ -311,7 +312,7 @@ def main():
                 f"model ({tokenizer.model_max_length}). Using max_seq_length={tokenizer.model_max_length}."
             )
         max_seq_length=min(args.max_seq_length, tokenizer.model_max_length)
-    
+    logger.info(f"Beginning Tokenization.")
     if args.line_by_line:
         #when using line_by_line, we just tokenize each non-empty line.
         padding="max_length" if args.pad_to_max_length else False
@@ -472,7 +473,7 @@ def main():
         # https://huggingface.co/docs/datasets/package_reference/main_classes.html#datasets.Dataset.map
         train_dataset=tokenized_datasets["train"]
         eval_dataset=tokenized_datasets["validation"]
-
+        logger.info(f"Grouping the tokenized dataset into chunks of {max_seq_length}.")
         with accelerator.main_process_first():
             train_dataset=train_dataset.map(
                 group_texts,
@@ -526,7 +527,7 @@ def main():
         }
     ]
     optimizer=AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
-
+    logger.info(f"Prepare model, optimizer, train_dataloader, eval_dataloader with accelerate.")
     # Prepare everything with out `accelerator`
     model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
         model, optimizer, train_dataloader, eval_dataloader
@@ -566,14 +567,14 @@ def main():
     # Only show the progress bar once on each machine.
     progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
-
+    logger.info(f"Creating directories for various checkpoints.")
     if accelerator.is_main_process:
         if args.output_dir is not None:
             for i in range(args.num_train_epochs):
                 dir_path=args.output_dir + "/model_checkpoint_epoch_{}".format(i+1)
                 os.makedirs(dir_path, exist_ok=True)
     accelerator.wait_for_everyone()
-
+    logger.info(f"Begin the training.")
     for epoch in range(args.num_train_epochs):
         model.train()
         for step, batch in enumerate(train_dataloader):
@@ -590,6 +591,9 @@ def main():
             
             if completed_steps>=args.max_train_steps:
                 break
+                
+            if step%100==0:
+                logger.info(f"Done with {completed_steps} steps and currently in epoch #{epoch+1}.")
 
         model.eval()
         losses=[]
@@ -608,16 +612,17 @@ def main():
             perplexity=float("inf")
         
         logger.info(f"epoch {epoch}: perplexity: {perplexity}")
-
+        
         if epoch<args.num_train_epochs-1:
             if args.output_dir is not None:
+                logger.info(f"saving model after epoch #{epoch+1}")
                 accelerator.wait_for_everyone()
                 unwrapped_model=accelerator.unwrap_model(model)
                 dir_path=args.output_dir+"/model_checkpoint_epoch_{}".format(epoch+1)
                 unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
                 if accelerator.is_main_process:
                     tokenizer.save_pretrained(dir_path)
-    
+    logger.info(f"Saving the final model after epoch #{epoch+1} and {completed_steps} steps.")
     if args.output_dir is not None:
         accelerator.wait_for_everyone()
         unwrapped_model=accelerator.unwrap_model(model)

@@ -13,10 +13,11 @@ An example is given below
 - Do you wish to use FP16 (mixed precision)? [yes/NO]: **yes**
 
 #### On a sample dataset
-- Run `./run_sample.sh` (It downloads `wikitext-2-raw-v1`, trains tokenizer on it, and then trains BERT from scratch for 3 epochs)
+- Run `python3 prepare_sample.py` (It downloads `wikitext-2-raw-v1`)
+- Run `python3 train_sample.py` trains tokenizer on data, and then trains BERT from scratch for 3 epochs)
 #### On the Bookcorpus + English Wikipedia dataset
 - Prepare the dataset by running `python3 prepare_bookcorpus_wiki.py`
-- Train BERT from scratch for 100,000 steps by running `./train_BERT.sh`
+- Train BERT from scratch for 1,000,000 steps by running `python3 train_BERT.py`
 
 ### Requirements
 
