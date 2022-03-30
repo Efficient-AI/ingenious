@@ -1,1 +1,6 @@
 __pycache__
+/wikitext-2-raw-v1/.*
+/wikitext-2-raw-v1
+books_large_*
+bookcorpus.tar.bz2
+/bert_dataset
