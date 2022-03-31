@@ -184,6 +184,12 @@ def parse_args():
     parser.add_argument(
         "--nsp_probability", type=float, default=0.5, help="Fraction of incorrect sentence pairs in all of the input"
     )
+    parser.add_argument(
+        "--subset_fraction", type=float, default=0.3, help="Fraction of the dataset that we want to use for training"
+    )
+    parser.add_argument(
+        "--subset_strategy", type=str, default='fl2mi', help="Subset selection strategy"
+    )
     args=parser.parse_args()
 
     return args
@@ -341,6 +347,10 @@ def main():
                 load_from_cache_file=not args.overwrite_cache,
                 desc="Running tokenizer on dataset line by line",
             )
+            num_samples = int(round(len(tokenized_datasets["train"])* args.subset_fraction, 0)) 
+            init_subset_indices = random.sample(list(range(len(tokenized_datasets["train"]))), num_samples)
+        full_dataset=tokenized_datasets["train"]
+        subset_dataset = tokenized_datasets["train"].select(init_subset_indices)
         eval_dataset=tokenized_datasets["validation"]
     else:
         # otherwise, we tokenize every text, then concatenate them together before splitting them in smaller parts.
@@ -495,19 +505,28 @@ def main():
                 with_indices=True,
                 desc=f"Grouping texts in chunks of {max_seq_length}",
             )
-
+        with accelerator.main_process_first():
+            num_samples = int(round(len(train_dataset)* args.subset_fraction, 0)) 
+            init_subset_indices = random.sample(list(range(len(train_dataset))), num_samples)
+        full_dataset=train_dataset
+        subset_dataset = full_dataset.select(init_subset_indices)
+    logger.info(f"Full data has {len(full_dataset)} samples, subset data has {len(subset_dataset)} samples.")
     # Log a few random samples from the training data
-    for index in random.sample(range(len(train_dataset)), 3):
-        logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
+    for index in random.sample(range(len(subset_dataset)), 3):
+        logger.info(f"Sample {index} of the data subset: {subset_dataset[index]}.")
 
     # Data Collator
     # This one will take care of the randomly masking the tokens.
     data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm_probability=args.mlm_probability)
 
     # Dataloaders creation
-    train_dataloader=DataLoader(
-        train_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
+    full_dataloader=DataLoader(
+        train_dataset, shuffle=False, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
     )
+
+    subset_dataloader=DataLoader(
+        subset_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_eval_batch_size)
+
     eval_dataloader=DataLoader(
         eval_dataset, collate_fn=data_collator, batch_size=args.per_device_eval_batch_size
     )
@@ -526,11 +545,10 @@ def main():
         }
     ]
     optimizer=AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
-    logger.info(f"Prepare model, optimizer, train_dataloader, eval_dataloader with accelerate.")
+    logger.info(f"Prepare model, optimizer, full_dataloader, subset_dataloader, eval_dataloader with accelerate.")
     # Prepare everything with out `accelerator`
-    model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
-        model, optimizer, train_dataloader, eval_dataloader
-    )
+    model, optimizer, full_dataloader, subset_dataloader, eval_dataloader = accelerator.prepare(
+        model, optimizer, full_dataloader, subset_dataloader, eval_dataloader)
 
     # On TPU, the tie weights in our model have been disconnected, so we need to restore the ties.
     if accelerator.distributed_type==DistributedType.TPU:
@@ -540,7 +558,7 @@ def main():
     # shorter in multiprocess)
 
     # Scheduler and math around the number of training steps
-    num_update_steps_per_epoch=math.ceil(len(train_dataloader)/args.gradient_accumulation_steps)
+    num_update_steps_per_epoch=math.ceil(len(subset_dataloader)/args.gradient_accumulation_steps)
     if args.max_train_steps is None:
         args.max_train_steps=args.num_train_epochs * num_update_steps_per_epoch
     else:
@@ -576,12 +594,12 @@ def main():
     logger.info(f"Begin the training.")
     for epoch in range(args.num_train_epochs):
         model.train()
-        for step, batch in enumerate(train_dataloader):
+        for step, batch in enumerate(subset_dataloader):
             outputs=model(**batch)
             loss=outputs.loss
             loss=loss/args.gradient_accumulation_steps
             accelerator.backward(loss)
-            if step%args.gradient_accumulation_steps==0 or step==len(train_dataloader)-1:
+            if step%args.gradient_accumulation_steps==0 or step==len(subset_dataloader)-1:
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()

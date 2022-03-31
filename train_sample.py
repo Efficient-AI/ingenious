@@ -5,7 +5,7 @@ def main():
     now=datetime.now()
     timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
     l=[
-        "accelerate", "launch", "run_language_modeling.py",
+        "accelerate", "launch", "run_lm_with_subsets.py",
         "--log_file", "./logs/log_sample_bert_"+timestamp+".log",
         "--load_data_from_disk",
         "--data_directory", "./wikitext-2-raw-v1",
