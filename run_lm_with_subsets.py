@@ -616,6 +616,13 @@ def main():
         num_training_steps=args.max_train_steps,
     )
 
+    if args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi']:
+        subset_strategy = SMIStrategy(None, None,
+                                    None, logger, args.selection_strategy,
+                                    num_partitions=20, partition_strategy='random',
+                                    optimizer='LazyGreedy', similarity_criterion='feature', 
+                                    metric='cosine', eta=1, stopIfZeroGain=False, 
+                                    stopIfNegativeGain=False, verbose=False, lambdaVal=1)
     # Train!
     total_batch_size=args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
@@ -706,19 +713,13 @@ def main():
                 representations = representations.cpu().detach().numpy()
                 logger.info('Representations gathered. Shape of representations: {}'.format(representations.shape))
                 if accelerator.is_main_process:
-                    init_subset_indices = SMIStrategy(representations, None,
-                 batch_indices, logger, args.selection_strategy,
-                 num_partitions=20, partition_strategy='random',
-                 optimizer='LazyGreedy', similarity_criterion='feature', 
-                 metric='cosine', eta=1, stopIfZeroGain=False, 
-                 stopIfNegativeGain=False, verbose=False, lambdaVal=1)
+                    subset_strategy.update_representations(representations, None, batch_indices)
+                    init_subset_indices = [subset_strategy.select(num_samples)]
                 else:
                     init_subset_indices = [[]]
             
             accelerator.wait_for_everyone()
             broadcast_object_list(init_subset_indices)
-            #accelerator.wait_for_everyone()
-            #print("Last element for ", accelerator.process_index, " is ", init_subset_indices[0][-1])
             subset_dataset = full_dataset.select(init_subset_indices[0])
             logger.info("Subset selection Finished. Subset size is {}".format(len(subset_dataset)))
             subset_dataloader=DataLoader(

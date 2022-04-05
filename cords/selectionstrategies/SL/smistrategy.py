@@ -23,7 +23,6 @@ class SMIStrategy():
         self.train_rep = train_representations
         self.query_rep = query_representations
         self.indices = original_indices
-        assert len(self.indices) == self.train_rep.shape[0], "Indices and representations must have same length"
         self.logger = logger
         self.optimizer = optimizer
         self.smi_func_type = smi_func_type
@@ -37,6 +36,12 @@ class SMIStrategy():
         self.lambdaVal = lambdaVal
         self.similarity_criterion = similarity_criterion
     
+    def update_representations(self, train_representations, query_representations, indices):
+        self.train_rep = train_representations
+        self.query_rep = query_representations
+        self.indices = indices
+        assert len(self.indices) == self.train_rep.shape[0], "Indices and representations must have same length"
+        
     def random_partition(self, num_partitions, indices):
         """
         Randomly partition the data into num_partitions
