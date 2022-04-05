@@ -11,7 +11,7 @@ import submodlib
 
 class SMIStrategy():
     def __init__(self, train_representations, query_representations,
-                 original_indices, logger, smi_func_type, query_size,
+                 original_indices, logger, smi_func_type, 
                  num_partitions=20, partition_strategy='random',
                  optimizer='LazyGreedy', similarity_criterion='feature', 
                  metric='cosine', eta=1, stopIfZeroGain=False, 
@@ -33,7 +33,6 @@ class SMIStrategy():
         self.eta = eta
         self.stopIfZeroGain = stopIfZeroGain
         self.stopIfNegativeGain = stopIfNegativeGain
-        self.query_size = query_size
         self.verbose = verbose
         self.lambdaVal = lambdaVal
         self.similarity_criterion = similarity_criterion

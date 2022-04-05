@@ -706,7 +706,12 @@ def main():
                 representations = representations.cpu().detach().numpy()
                 logger.info('Representations gathered. Shape of representations: {}'.format(representations.shape))
                 if accelerator.is_main_process:
-                    init_subset_indices = [random.sample(list(range(len(full_dataset))), num_samples)]
+                    init_subset_indices = SMIStrategy(representations, None,
+                 batch_indices, logger, args.selection_strategy,
+                 num_partitions=20, partition_strategy='random',
+                 optimizer='LazyGreedy', similarity_criterion='feature', 
+                 metric='cosine', eta=1, stopIfZeroGain=False, 
+                 stopIfNegativeGain=False, verbose=False, lambdaVal=1)
                 else:
                     init_subset_indices = [[]]
             
