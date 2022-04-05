@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import copy
 import logging
 import math
 import os
@@ -10,19 +11,22 @@ from torch.optim import AdamW
 from datasets import load_dataset, load_from_disk
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-
 import transformers
 from accelerate import Accelerator, DistributedType
+from accelerate.utils import broadcast_object_list
 from transformers import(
     BertConfig,
     BertTokenizerFast,
     BertForPreTraining,
+    TrainingArguments,
+    training_args,
     DataCollatorForLanguageModeling,
     SchedulerType,
     get_scheduler,
     set_seed
 )
 from transformers.utils.versions import require_version
+from cords.selectionstrategies.SL import SMIStrategy
 
 logger=logging.getLogger(__name__)
 require_version("datasets>=1.8.0", "To fix: pip install -r requirements.txt")
@@ -185,10 +189,13 @@ def parse_args():
         "--nsp_probability", type=float, default=0.5, help="Fraction of incorrect sentence pairs in all of the input"
     )
     parser.add_argument(
-        "--subset_fraction", type=float, default=0.3, help="Fraction of the dataset that we want to use for training"
+        "--subset_fraction", type=float, default=0.1, help="Fraction of the dataset that we want to use for training"
     )
     parser.add_argument(
-        "--subset_strategy", type=str, default='fl2mi', help="Subset selection strategy"
+        "--selection_strategy", type=str, default='fl2mi', help="Subset selection strategy"
+    )
+    parser.add_argument(
+        "--select_every", type=int, default=2, help="Select a new subset for training every select_every epochs"
     )
     args=parser.parse_args()
 
@@ -197,7 +204,9 @@ def parse_args():
 
 def main():
     args=parse_args()
-    torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=25000))
+    #torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=25000))
+    #parser = HfArgumentParser((TrainingArguments))
+    #training_args = parser.parse_args_into_dataclasses()
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     accelerator=Accelerator()
     # Make one log on every process with the configuration for debugging
@@ -275,6 +284,22 @@ def main():
             layer_norm_eps=1e-12,
             position_embedding_type="absolute",
         )
+        config1=BertConfig(
+            vocab_size=args.vocab_size,
+            hidden_size=768,
+            num_hidden_layers=12,
+            num_attention_heads=12,
+            intermediate_size=3072,
+            hidden_act="gelu",
+            hidden_dropout_prob=0.1,
+            attention_probs_dropout_prob=0.1,
+            max_position_embeddings=512,
+            type_vocab_size=2,
+            initializer_range=0.02,
+            layer_norm_eps=1e-12,
+            position_embedding_type="absolute",
+            output_hidden_states=True
+        )
     logger.info(f"Loading the tokenizer.")
     if args.tokenizer_name:
         tokenizer=BertTokenizerFast.from_pretrained(args.tokenizer_name, use_fast=not args.use_slow_tokenizer)
@@ -292,11 +317,17 @@ def main():
             from_tf=bool(".ckpt"in args.model_name_or_path),
             config=config
         )
+        # model1=BertForPreTraining.from_pretrained(
+        #     args.model_name_or_path,
+        #     from_tf=bool(".ckpt"in args.model_name_or_path),
+        #     config=config1
+        # )
     else:
         model=BertForPreTraining(config)
+        #model1=BertForPreTraining(config1)
 
     model.resize_token_embeddings(len(tokenizer))
-
+    #model1.resize_token_embeddings(len(tokenizer))
     #Preprocessing the datasets
     #First we tokenize all the texts
     column_names=raw_datasets['train'].column_names
@@ -347,8 +378,13 @@ def main():
                 load_from_cache_file=not args.overwrite_cache,
                 desc="Running tokenizer on dataset line by line",
             )
+        if accelerator.is_main_process:
             num_samples = int(round(len(tokenized_datasets["train"])* args.subset_fraction, 0)) 
             init_subset_indices = random.sample(list(range(len(tokenized_datasets["train"]))), num_samples)
+        else:
+            init_subset_indices = []
+        accelerator.wait_for_everyone()
+        broadcast_object_list(init_subset_indices)
         full_dataset=tokenized_datasets["train"]
         subset_dataset = tokenized_datasets["train"].select(init_subset_indices)
         eval_dataset=tokenized_datasets["validation"]
@@ -492,7 +528,7 @@ def main():
                 num_proc=args.preprocessing_num_workers,
                 load_from_cache_file=not args.overwrite_cache,
                 with_indices=True,
-                desc=f"Grouping texts in chunks of {max_seq_length}",
+                desc=f"Grouping Train texts in chunks of {max_seq_length}",
             )
         with accelerator.main_process_first():
             eval_dataset=eval_dataset.map(
@@ -503,13 +539,20 @@ def main():
                 num_proc=args.preprocessing_num_workers,
                 load_from_cache_file=not args.overwrite_cache,
                 with_indices=True,
-                desc=f"Grouping texts in chunks of {max_seq_length}",
+                desc=f"Grouping Validation texts in chunks of {max_seq_length}",
             )
-        with accelerator.main_process_first():
-            num_samples = int(round(len(train_dataset)* args.subset_fraction, 0)) 
-            init_subset_indices = random.sample(list(range(len(train_dataset))), num_samples)
+        #init_subset_indices = []
+        if accelerator.is_main_process:
+            num_samples = int(round(len(train_dataset) * args.subset_fraction, 0)) 
+            init_subset_indices = [random.sample(list(range(len(train_dataset))), num_samples)]
+        else:
+            init_subset_indices = [[]]
+        accelerator.wait_for_everyone()
+        broadcast_object_list(init_subset_indices)
+        #accelerator.wait_for_everyone()
+        #print("Last element for ", accelerator.process_index, " is ", init_subset_indices[0][-1])
         full_dataset=train_dataset
-        subset_dataset = full_dataset.select(init_subset_indices)
+        subset_dataset = full_dataset.select(init_subset_indices[0])
     logger.info(f"Full data has {len(full_dataset)} samples, subset data has {len(subset_dataset)} samples.")
     # Log a few random samples from the training data
     for index in random.sample(range(len(subset_dataset)), 3):
@@ -525,7 +568,7 @@ def main():
     )
 
     subset_dataloader=DataLoader(
-        subset_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_eval_batch_size)
+        subset_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size)
 
     eval_dataloader=DataLoader(
         eval_dataset, collate_fn=data_collator, batch_size=args.per_device_eval_batch_size
@@ -544,6 +587,7 @@ def main():
             "weight_decay": 0.0
         }
     ]
+
     optimizer=AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
     logger.info(f"Prepare model, optimizer, full_dataloader, subset_dataloader, eval_dataloader with accelerate.")
     # Prepare everything with out `accelerator`
@@ -553,6 +597,7 @@ def main():
     # On TPU, the tie weights in our model have been disconnected, so we need to restore the ties.
     if accelerator.distributed_type==DistributedType.TPU:
         model.tie_weights()
+        #model1.tie_weights()
 
     # Note -> the training dataloader needs to be prepared before we grab his length below (because its length will be 
     # shorter in multiprocess)
@@ -590,6 +635,7 @@ def main():
             for i in range(args.num_train_epochs):
                 dir_path=args.output_dir + "/model_checkpoint_epoch_{}".format(i+1)
                 os.makedirs(dir_path, exist_ok=True)
+
     accelerator.wait_for_everyone()
     logger.info(f"Begin the training.")
     for epoch in range(args.num_train_epochs):
@@ -630,6 +676,50 @@ def main():
         
         logger.info(f"epoch {epoch}: perplexity: {perplexity}")
         
+        if (epoch+1) % args.select_every == 0:
+            accelerator.wait_for_everyone()
+            num_samples = int(round(len(full_dataset) * args.subset_fraction, 0)) 
+            if args.selection_strategy == 'Random-Online':
+                if accelerator.is_main_process:
+                    init_subset_indices = [random.sample(list(range(len(full_dataset))), num_samples)]
+                else:
+                    init_subset_indices = [[]]
+            elif args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi']:
+                model.eval()
+                representations = []
+                batch_indices = []
+                for step, batch in enumerate(full_dataloader):
+                    with torch.no_grad():
+                        output=model(**batch, output_hidden_states=True)
+                    #embeddings=output.last_hidden_state
+                    embeddings=output['hidden_states'][1]
+                    batch_indices.append(accelerator.gather(torch.tensor(list(full_dataloader.batch_sampler)[step]).to(accelerator.device)))
+                    mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
+                    mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
+                    representations.append(accelerator.gather(mean_pooled))
+                batch_indices=torch.cat(batch_indices)
+                batch_indices = batch_indices[:len(full_dataset)]
+                batch_indices = batch_indices.cpu().tolist()
+                logger.info('Length of indices: {}'.format(len(batch_indices)))
+                representations=torch.cat(representations, dim = 0)
+                representations=representations[:len(full_dataset)]
+                representations = representations.cpu().detach().numpy()
+                logger.info('Representations gathered. Shape of representations: {}'.format(representations.shape))
+                if accelerator.is_main_process:
+                    init_subset_indices = [random.sample(list(range(len(full_dataset))), num_samples)]
+                else:
+                    init_subset_indices = [[]]
+            
+            accelerator.wait_for_everyone()
+            broadcast_object_list(init_subset_indices)
+            #accelerator.wait_for_everyone()
+            #print("Last element for ", accelerator.process_index, " is ", init_subset_indices[0][-1])
+            subset_dataset = full_dataset.select(init_subset_indices[0])
+            logger.info("Subset selection Finished. Subset size is {}".format(len(subset_dataset)))
+            subset_dataloader=DataLoader(
+                subset_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size)
+            subset_dataloader = accelerator.prepare(subset_dataloader)
+
         if epoch<args.num_train_epochs-1:
             if args.output_dir is not None:
                 logger.info(f"saving model after epoch #{epoch+1}")
@@ -639,6 +729,7 @@ def main():
                 unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
                 if accelerator.is_main_process:
                     tokenizer.save_pretrained(dir_path)
+
     logger.info(f"Saving the final model after epoch #{epoch+1} and {completed_steps} steps.")
     if args.output_dir is not None:
         accelerator.wait_for_everyone()
