@@ -41,7 +41,7 @@ class SMIStrategy():
         self.query_rep = query_representations
         self.indices = indices
         assert len(self.indices) == self.train_rep.shape[0], "Indices and representations must have same length"
-        
+
     def random_partition(self, num_partitions, indices):
         """
         Randomly partition the data into num_partitions
@@ -84,9 +84,16 @@ class SMIStrategy():
             partition_indices = self.dbscan(self.num_partitions, self.train_rep, self.indices)
         else:
             partition_indices = [list(range(len(self.indices)))]
+        
+        if self.partition_strategy not in ['random', 'dbscan']:
+            assert self.num_partitions == 1, "Partition strategy {} not implemented for {} partitions".format(self.partition_strategy, self.num_partitions)
+    
         partition_budget_splits = [math.ceil(budget * ((1+x) / self.num_partitions)) for x in range(self.num_partitions)]
         greedyIdxs = []
-        for partition, partition_budget_split in partition_indices, partition_budget_splits:
+        assert len(partition_indices) == len(partition_budget_splits), "Number of partitions must match number of partition budget splits"
+        for i in range(len(partition_indices)):
+            partition = partition_indices[i]
+            partition_budget_split = partition_budget_splits[i]
             partition_train_rep = self.train_rep[partition]
             if self.query_rep is None:
                 partition_query_rep = self.train_rep[partition]
