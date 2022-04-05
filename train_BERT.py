@@ -10,9 +10,10 @@ def main():
     os.makedirs(log_dir)
     l=[
         "accelerate", "launch", "run_language_modeling.py",
+        "--preprocessed",
         "--log_file", log_dir+"train.log",
         "--load_data_from_disk",
-        "--data_directory", "./bert_dataset",
+        "--data_directory", "./bert_dataset_prepared",
         "--tokenizer_name", "bert-base-uncased",
         "--vocab_size", "30522",
         "--preprocess_batch_size", "2000",
