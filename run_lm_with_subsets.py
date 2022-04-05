@@ -204,9 +204,6 @@ def parse_args():
 
 def main():
     args=parse_args()
-    #torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=25000))
-    #parser = HfArgumentParser((TrainingArguments))
-    #training_args = parser.parse_args_into_dataclasses()
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     accelerator=Accelerator()
     # Make one log on every process with the configuration for debugging
@@ -284,22 +281,7 @@ def main():
             layer_norm_eps=1e-12,
             position_embedding_type="absolute",
         )
-        config1=BertConfig(
-            vocab_size=args.vocab_size,
-            hidden_size=768,
-            num_hidden_layers=12,
-            num_attention_heads=12,
-            intermediate_size=3072,
-            hidden_act="gelu",
-            hidden_dropout_prob=0.1,
-            attention_probs_dropout_prob=0.1,
-            max_position_embeddings=512,
-            type_vocab_size=2,
-            initializer_range=0.02,
-            layer_norm_eps=1e-12,
-            position_embedding_type="absolute",
-            output_hidden_states=True
-        )
+
     logger.info(f"Loading the tokenizer.")
     if args.tokenizer_name:
         tokenizer=BertTokenizerFast.from_pretrained(args.tokenizer_name, use_fast=not args.use_slow_tokenizer)
@@ -378,6 +360,8 @@ def main():
                 load_from_cache_file=not args.overwrite_cache,
                 desc="Running tokenizer on dataset line by line",
             )
+       
+        # Initial Random Subset Selection Selection
         if accelerator.is_main_process:
             num_samples = int(round(len(tokenized_datasets["train"])* args.subset_fraction, 0)) 
             init_subset_indices = random.sample(list(range(len(tokenized_datasets["train"]))), num_samples)
@@ -541,7 +525,7 @@ def main():
                 with_indices=True,
                 desc=f"Grouping Validation texts in chunks of {max_seq_length}",
             )
-        #init_subset_indices = []
+        #Initial Random Subset Selection 
         if accelerator.is_main_process:
             num_samples = int(round(len(train_dataset) * args.subset_fraction, 0)) 
             init_subset_indices = [random.sample(list(range(len(train_dataset))), num_samples)]

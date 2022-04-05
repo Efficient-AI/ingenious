@@ -88,12 +88,9 @@ class SMIStrategy():
         if self.partition_strategy not in ['random', 'dbscan']:
             assert self.num_partitions == 1, "Partition strategy {} not implemented for {} partitions".format(self.partition_strategy, self.num_partitions)
     
-        partition_budget_splits = [math.ceil(budget * ((1+x) / self.num_partitions)) for x in range(self.num_partitions)]
+        partition_budget_split = math.ceil(budget/self.num_partitions)
         greedyIdxs = []
-        assert len(partition_indices) == len(partition_budget_splits), "Number of partitions must match number of partition budget splits"
-        for i in range(len(partition_indices)):
-            partition = partition_indices[i]
-            partition_budget_split = partition_budget_splits[i]
+        for partition in partition_indices:
             partition_train_rep = self.train_rep[partition]
             if self.query_rep is None:
                 partition_query_rep = self.train_rep[partition]
@@ -141,7 +138,7 @@ class SMIStrategy():
 
             greedyIdxs.extend([x[0] for x in greedyList])
             
-        originalIdxs = self.indices[greedyIdxs]
+        originalIdxs = [self.indices[x] for x in greedyIdxs]
         smi_end_time = time.time()
         self.logger.info("SMI algorithm Subset Selection time is: %.4f", smi_end_time - smi_start_time)
         return originalIdxs
