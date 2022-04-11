@@ -1,5 +1,6 @@
 import math
 import numpy as np
+import torch
 import time
 import random
 from scipy.sparse import csr_matrix
@@ -7,6 +8,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from .dataselectionstrategy import DataSelectionStrategy
 from torch.utils.data import Subset, DataLoader
 import submodlib
+from cuml.cluster import KMeans
 # from submodlib import FacilityLocationMutualInformationFunction, FacilityLocationVariantMutualInformationFunction
 
 class SMIStrategy():
@@ -64,6 +66,15 @@ class SMIStrategy():
             partition_indices.append(random_indices[i*partition_size:(i+1)*partition_size])
         return partition_indices
 
+    def kmeans(self, num_partitions, indices, partition_budget_split):
+        partition_indices=[[] for i in range(num_partitions)]
+        kmeans=KMeans(n_clusters=num_partitions)
+        kmeans.fit(self.train_rep)
+        for i, lab in enumerate(kmeans.labels_):
+            partition_indices[lab].append(indices[i])
+        for l in partition_indices:
+            assert len(l)>=partition_budget_split, "Budget must be less than effective ground set size"
+        return partition_indices
 
     def select(self, budget):
         """
@@ -77,18 +88,18 @@ class SMIStrategy():
         -------
 
         """
+        partition_budget_split = math.ceil(budget/self.num_partitions)
         smi_start_time = time.time()
         if self.partition_strategy == 'random':
             partition_indices = self.random_partition(self.num_partitions, self.indices) 
-        elif self.partition_strategy == 'dbscan':
-            partition_indices = self.dbscan(self.num_partitions, self.train_rep, self.indices)
+        elif self.partition_strategy == 'kmeans':
+            partition_indices = self.kmeans(self.num_partitions, self.indices, partition_budget_split)
         else:
             partition_indices = [list(range(len(self.indices)))]
         
-        if self.partition_strategy not in ['random', 'dbscan']:
+        if self.partition_strategy not in ['random', 'kmeans']:
             assert self.num_partitions == 1, "Partition strategy {} not implemented for {} partitions".format(self.partition_strategy, self.num_partitions)
     
-        partition_budget_split = math.ceil(budget/self.num_partitions)
         greedyIdxs = []
         for partition in partition_indices:
             partition_train_rep = self.train_rep[partition]

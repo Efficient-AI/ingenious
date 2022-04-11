@@ -5,3 +5,7 @@ accelerate
 datasets
 tokenizers
 torch
+scipy
+sklearn
+matplotlib
+apricot-select
