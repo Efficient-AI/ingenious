@@ -8,7 +8,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from .dataselectionstrategy import DataSelectionStrategy
 from torch.utils.data import Subset, DataLoader
 import submodlib
-from cuml.cluster import KMeans
+# from cuml.cluster import KMeans
 # from submodlib import FacilityLocationMutualInformationFunction, FacilityLocationVariantMutualInformationFunction
 
 class SMIStrategy():
@@ -67,13 +67,20 @@ class SMIStrategy():
         return partition_indices
 
     def kmeans(self, num_partitions, indices, partition_budget_split):
-        partition_indices=[[] for i in range(num_partitions)]
-        kmeans=KMeans(n_clusters=num_partitions)
-        kmeans.fit(self.train_rep)
-        for i, lab in enumerate(kmeans.labels_):
-            partition_indices[lab].append(indices[i])
-        for l in partition_indices:
-            assert len(l)>=partition_budget_split, "Budget must be less than effective ground set size"
+        # partition_indices=[[] for i in range(num_partitions)]
+        # kmeans=KMeans(n_clusters=num_partitions)
+        # kmeans.fit(self.train_rep)
+        # for i, lab in enumerate(kmeans.labels_):
+        #     partition_indices[lab].append(indices[i])
+        # for l in partition_indices:
+        #     assert len(l)>=partition_budget_split, "Budget must be less than effective ground set size"
+        # return partition_indices
+        partition_indices = []
+        partition_size = int(math.ceil(len(indices)/num_partitions))
+        random_indices = list(range(len(indices)))
+        random.shuffle(random_indices)
+        for i in range(num_partitions):
+            partition_indices.append(random_indices[i*partition_size:(i+1)*partition_size])
         return partition_indices
 
     def select(self, budget):
