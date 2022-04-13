@@ -30,7 +30,7 @@ def main():
         "--short_seq_prob", "0.1",
         "--nsp_probability", "0.5",
         "--select_every", "100",
-        "--partition_strategy", "kmeans",
+        "--partition_strategy", "random",
         "--num_partitions", "3",
         "--save_every", "100",
     ]
