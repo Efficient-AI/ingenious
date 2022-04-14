@@ -679,16 +679,17 @@ def main():
                         with torch.no_grad():
                             output=model(**batch, output_hidden_states=True)
                         embeddings=output['hidden_states'][7]
-                        batch_indices.append(accelerator.gather(torch.tensor(list(full_dataloader.batch_sampler)[step]).to(accelerator.device)))
+                        #batch_indices.append(accelerator.gather(torch.tensor(list(full_dataloader.batch_sampler)[step]).to(accelerator.device)))
                         mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
-                        mask1=(batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())
+                        mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
                         mask=mask*mask1
                         mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
                         representations.append(accelerator.gather(mean_pooled))
                         pbar.update(1)
-                    batch_indices=torch.cat(batch_indices)
-                    batch_indices = batch_indices[:len(full_dataset)]
-                    batch_indices = batch_indices.cpu().tolist()
+                    # batch_indices=torch.cat(batch_indices)
+                    # batch_indices = batch_indices[:len(full_dataset)]
+                    # batch_indices = batch_indices.cpu().tolist()
+                    batch_indices=list(range(len(full_dataset)))
                     logger.info('Length of indices: {}'.format(len(batch_indices)))
                     representations=torch.cat(representations, dim = 0)
                     representations=representations[:len(full_dataset)]
@@ -703,7 +704,9 @@ def main():
                 accelerator.wait_for_everyone()
                 broadcast_object_list(init_subset_indices)
                 subset_dataset = full_dataset.select(init_subset_indices[0])
+                nsp=subset_dataset.filter(lambda example: example["next_sentence_label"]==1, num_proc=args.preprocessing_num_workers, desc="finding nsp 1")
                 logger.info("Subset selection Finished. Subset size is {}".format(len(subset_dataset)))
+                logger.info("NSP label distribution of the selected subset is 1:{}, 0:{}".format(len(nsp)/len(subset_dataset), (len(subset_dataset)-len(nsp))/len(subset_dataset)))
                 subset_dataloader=DataLoader(
                     subset_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size)
                 subset_dataloader = accelerator.prepare(subset_dataloader)
