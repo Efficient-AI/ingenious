@@ -5,7 +5,7 @@ from datetime import datetime
 def main():
     now=datetime.now()
     timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
-    log_dir="./logs/bert_logs_"+timestamp+"/"
+    log_dir="./logs/bert_subsets_random_logs_"+timestamp+"/"
     model_dir="./models/BERT_"+timestamp +"/"
     os.makedirs(log_dir)
     l=[
@@ -17,11 +17,11 @@ def main():
         "--tokenizer_name", "bert-base-uncased",
         "--vocab_size", "30522",
         "--preprocess_batch_size", "2000",
-        "--per_device_train_batch_size", "32",
-        "--per_device_eval_batch_size", "32",
+        "--per_device_train_batch_size", "256",
+        "--per_device_eval_batch_size", "256",
         "--learning_rate", "1e-4",
         "--weight_decay" ,"0.01",
-        "--max_train_steps", "500000",
+        "--max_train_steps", "1000000",
         "--gradient_accumulation_steps", "1",
         "--num_warmup_steps", "0",
         "--output_dir", model_dir,
