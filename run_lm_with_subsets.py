@@ -710,13 +710,14 @@ def main():
                 accelerator.wait_for_everyone()
                 broadcast_object_list(init_subset_indices)
                 subset_dataset = full_dataset.select(init_subset_indices[0])
-                nsp=subset_dataset.filter(lambda example: example["next_sentence_label"]==1, num_proc=args.preprocessing_num_workers, desc="finding nsp 1")
-                logger.info("Subset selection Finished. Subset size is {}".format(len(subset_dataset)))
-                logger.info("NSP label distribution of the selected subset is 1:{}, 0:{}".format(len(nsp)/len(subset_dataset), (len(subset_dataset)-len(nsp))/len(subset_dataset)))
                 subset_dataloader=DataLoader(
                     subset_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size)
                 subset_dataloader = accelerator.prepare(subset_dataloader)
                 subset_time = (time.time() - start_time)
+                timing.append([train_time, subset_time])
+                nsp=subset_dataset.filter(lambda example: example["next_sentence_label"]==1, num_proc=args.preprocessing_num_workers, desc="finding nsp 1")
+                logger.info("Subset selection Finished. Subset size is {}".format(len(subset_dataset)))
+                logger.info("NSP label distribution of the selected subset is 1:{}, 0:{}".format(len(nsp)/len(subset_dataset), (len(subset_dataset)-len(nsp))/len(subset_dataset)))
                 break
             timing.append([train_time, subset_time])
 
