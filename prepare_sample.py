@@ -18,10 +18,10 @@ def parse_args():
 def main():
     args=parse_args()
     
-    dataset=load_dataset("wikitext", "wikitext-103-raw-v1", split='train')
+    dataset=load_dataset("wikitext", "wikitext-2-raw-v1", split='train')
     dataset=dataset.train_test_split(test_size=(args.validation_split_percentage/100), shuffle=False)
     dataset=datasets.DatasetDict({"train": dataset["train"], "validation": dataset["test"]})
-    dataset.save_to_disk("./wikitext-103-raw-v1")
+    dataset.save_to_disk("./wikitext-2-raw-v1")
 
 if __name__=="__main__":
     main()

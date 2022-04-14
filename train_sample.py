@@ -12,7 +12,7 @@ def main():
         "accelerate", "launch", "run_lm_with_subsets.py",
         "--log_dir", log_dir,
         "--load_data_from_disk",
-        "--data_directory", "./wikitext-103-raw-v1",
+        "--data_directory", "./wikitext-2-raw-v1",
         "--tokenizer_name", "bert-base-uncased",
         "--vocab_size", "30522",
         "--preprocess_batch_size", "2000",
