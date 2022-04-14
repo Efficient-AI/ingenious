@@ -681,6 +681,8 @@ def main():
                         embeddings=output['hidden_states'][7]
                         batch_indices.append(accelerator.gather(torch.tensor(list(full_dataloader.batch_sampler)[step]).to(accelerator.device)))
                         mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
+                        mask1=(batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())
+                        mask=mask*mask1
                         mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
                         representations.append(accelerator.gather(mean_pooled))
                         pbar.update(1)
