@@ -22,6 +22,7 @@ from transformers import(
     get_scheduler,
     set_seed
 )
+import time
 from transformers.utils.versions import require_version
 from cords.selectionstrategies.SL import SMIStrategy
 
@@ -631,9 +632,14 @@ def main():
             os.makedirs(args.output_dir+"/model_checkpoint_{}".format(1+i))
     accelerator.wait_for_everyone()
     logger.info(f"Begin the training.")
+    timing = []
     for epoch in range(args.num_train_epochs):
         model.train()
+
         for step, batch in enumerate(subset_dataloader):
+            train_time = 0
+            subset_time = 0
+            start_time = time.time()
             outputs=model(**batch)
             loss=outputs.loss
             loss=loss/args.gradient_accumulation_steps
@@ -644,7 +650,7 @@ def main():
                 optimizer.zero_grad()
                 progress_bar.update(1)
                 completed_steps+=1
-            
+            train_time += (time.time() - start_time)
             if completed_steps>=args.max_train_steps:
                 break
                 
@@ -664,6 +670,7 @@ def main():
 
             if (1+completed_steps)%args.select_every==0:
                 accelerator.wait_for_everyone()
+                start_time = time.time()
                 num_samples = int(round(len(full_dataset) * args.subset_fraction, 0)) 
                 if args.selection_strategy == 'Random-Online':
                     if accelerator.is_main_process:
@@ -700,7 +707,6 @@ def main():
                         init_subset_indices = [subset_strategy.select(num_samples)]
                     else:
                         init_subset_indices = [[]]
-                
                 accelerator.wait_for_everyone()
                 broadcast_object_list(init_subset_indices)
                 subset_dataset = full_dataset.select(init_subset_indices[0])
@@ -710,7 +716,9 @@ def main():
                 subset_dataloader=DataLoader(
                     subset_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size)
                 subset_dataloader = accelerator.prepare(subset_dataloader)
+                subset_time = (time.time() - start_time)
                 break
+            timing.append([train_time, subset_time])
 
         model.eval()
         losses=[]
@@ -732,6 +740,7 @@ def main():
 
 
     logger.info(f"Saving the final model after {completed_steps} steps.")
+    logger.info(f"Timing: {timing}")
     if args.output_dir is not None:
         accelerator.wait_for_everyone()
         unwrapped_model=accelerator.unwrap_model(model)
