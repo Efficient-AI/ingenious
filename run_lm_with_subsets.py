@@ -209,6 +209,9 @@ def parse_args():
         "--num_partitions", type=int, default=1000, help="Number of partitions in subset selection"
     )
     parser.add_argument(
+        "--private_partitions", type=int, default=5, help="Number of private partitions using CG functions in subset selection"
+    )
+    parser.add_argument(
         "--save_every", type=int, default=100000, help="Save the model checkpoint after training for every save_every training steps"
     )
     args=parser.parse_args()
@@ -720,7 +723,8 @@ def main():
                     
                     if accelerator.is_main_process:
                         # subset_strategy.update_representations(representations, None, batch_indices)
-                        init_subset_indices = [subset_strategy.select(num_samples, batch_indices, representations)]
+                        init_subset_indices = [subset_strategy.select(num_samples, batch_indices, 
+                                                representations, private_partitions=args.private_partitions)]
                     else:
                         init_subset_indices = [[]]
 

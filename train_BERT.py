@@ -33,6 +33,8 @@ def main():
         "--select_every", "100000",
         "--partition_strategy", "random",
         "--num_partitions", "1000",
+        "--selection_strategy", "flcg",
+        "--private_partitions", "5",
         "--save_every", "100000",
     ]
     subprocess.run(l)
