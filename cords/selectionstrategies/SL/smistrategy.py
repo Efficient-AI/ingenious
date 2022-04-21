@@ -38,11 +38,11 @@ class SMIStrategy():
         self.lambdaVal = lambdaVal
         self.similarity_criterion = similarity_criterion
     
-    def update_representations(self, train_representations, query_representations, indices):
-        self.train_rep = train_representations
-        self.query_rep = query_representations
-        self.indices = indices
-        assert len(self.indices) == self.train_rep.shape[0], "Indices and representations must have same length"
+    # def update_representations(self, train_representations, query_representations, indices):
+    #     self.train_rep = train_representations
+    #     self.query_rep = query_representations
+    #     self.indices = indices
+    #     assert len(self.indices) == self.train_rep.shape[0], "Indices and representations must have same length"
 
     def random_partition(self, num_partitions, indices):
         """
@@ -83,7 +83,7 @@ class SMIStrategy():
             partition_indices.append(random_indices[i*partition_size:(i+1)*partition_size])
         return partition_indices
 
-    def select(self, budget):
+    def select(self, budget, indices, representations, query_representations=None):
         """
 
         Parameters
@@ -98,48 +98,84 @@ class SMIStrategy():
         partition_budget_split = math.ceil(budget/self.num_partitions)
         smi_start_time = time.time()
         if self.partition_strategy == 'random':
-            partition_indices = self.random_partition(self.num_partitions, self.indices) 
+            partition_indices = self.random_partition(self.num_partitions, indices) 
         elif self.partition_strategy == 'kmeans':
-            partition_indices = self.kmeans(self.num_partitions, self.indices, partition_budget_split)
+            partition_indices = self.kmeans(self.num_partitions, indices, partition_budget_split)
         else:
-            partition_indices = [list(range(len(self.indices)))]
+            partition_indices = [list(range(len(indices)))]
         
         if self.partition_strategy not in ['random', 'kmeans']:
             assert self.num_partitions == 1, "Partition strategy {} not implemented for {} partitions".format(self.partition_strategy, self.num_partitions)
     
         greedyIdxs = []
+        partition_cnt = 1
+        if self.smi_func_type in ['logdetmi']:
+            if query_representations is not None:
+                query_query_sijs = submodlib.helper.create_kernel(X=query_representations,
+                                                                metric=self.metric,
+                                                                method='sklearn')                
+            
         for partition in partition_indices:
-            partition_train_rep = self.train_rep[partition]
-            if self.query_rep is None:
-                partition_query_rep = self.train_rep[partition]
+            partition_train_rep = representations[partition]
+            
+            if query_representations is None:
+                partition_query_rep = representations[partition]    
+                query_sijs = submodlib.helper.create_kernel(X=partition_query_rep, X_rep=partition_train_rep, 
+                                                            metric=self.metric, method='sklearn')
             else:
-                partition_query_rep = self.query_rep
-
-            query_sijs = submodlib.helper.create_kernel(X=partition_query_rep, X_rep=partition_train_rep, 
-                                                        metric=self.metric, method='sklearn')
-
+                query_sijs = submodlib.helper.create_kernel(X=query_representations, X_rep=partition_train_rep, 
+                                                            metric=self.metric, method='sklearn')
+            
             if self.smi_func_type in ['fl1mi', 'logdetmi']:
-                data_sijs = submodlib.helper.create_kernel(X=partition_train_rep, metric=self.metric,
+                if query_representations is None:
+                    data_sijs = query_sijs
+                else:
+                    data_sijs = submodlib.helper.create_kernel(X=partition_train_rep, metric=self.metric,
                                                             method='sklearn')
+            
             if self.smi_func_type in ['logdetmi']:
-                query_query_sijs = submodlib.helper.create_kernel(X=partition_query_rep,
-                                                                    metric=self.metric,
-                                                                    method='sklearn')
+                if query_representations is None:
+                    query_query_sijs = query_sijs
+                
             
             if self.smi_func_type == 'fl1mi':
-                obj = submodlib.FacilityLocationMutualInformationFunction(n=partition_train_rep.shape[0],
+                if query_representations is None:
+                    obj = submodlib.FacilityLocationMutualInformationFunction(n=partition_train_rep.shape[0],
                                                                 num_queries=partition_query_rep.shape[0],
                                                                 data_sijs=data_sijs,
                                                                 query_sijs=query_sijs,
                                                                 magnificationEta=self.eta)
+                else:
+                    obj = submodlib.FacilityLocationMutualInformationFunction(n=partition_train_rep.shape[0],
+                                                                num_queries=query_representations.shape[0],
+                                                                data_sijs=data_sijs,
+                                                                query_sijs=query_sijs,
+                                                                magnificationEta=self.eta)               
             if self.smi_func_type == 'fl2mi':
-                obj = submodlib.FacilityLocationVariantMutualInformationFunction(n=partition_train_rep.shape[0],
+                if query_representations is None:
+                    obj = submodlib.FacilityLocationVariantMutualInformationFunction(n=partition_train_rep.shape[0],
                                                                 num_queries=partition_query_rep.shape[0],
                                                                 query_sijs=query_sijs,
                                                                 queryDiversityEta=self.eta)
+                else:
+                    obj = submodlib.FacilityLocationVariantMutualInformationFunction(n=partition_train_rep.shape[0],
+                                                                num_queries=query_representations.shape[0],
+                                                                query_sijs=query_sijs,
+                                                                queryDiversityEta=self.eta)
+
             if self.smi_func_type == 'logdetmi':
-                obj = submodlib.LogDeterminantMutualInformationFunction(n=partition_train_rep.shape[0],
-                                                                        num_queries=partition_query_rep.shape[0],
+                if query_representations is None:
+                    obj = submodlib.LogDeterminantMutualInformationFunction(n=partition_train_rep.shape[0],
+                                                                            num_queries=partition_query_rep.shape[0],
+                                                                            data_sijs=data_sijs,
+                                                                            lambdaVal=self.lambdaVal,
+                                                                            query_sijs=query_sijs,
+                                                                            query_query_sijs=query_query_sijs,
+                                                                            magnificationEta=self.eta
+                                                                            )
+                else:
+                    obj = submodlib.LogDeterminantMutualInformationFunction(n=partition_train_rep.shape[0],
+                                                                        num_queries=query_representations.shape[0],
                                                                         data_sijs=data_sijs,
                                                                         lambdaVal=self.lambdaVal,
                                                                         query_sijs=query_sijs,
@@ -147,13 +183,29 @@ class SMIStrategy():
                                                                         magnificationEta=self.eta
                                                                         )
             if self.smi_func_type == 'gcmi':
-                obj = submodlib.GraphCutMutualInformationFunction(n=partition_train_rep.shape[0],
-                                                                    num_queries=partition_query_rep.shape[0],
-                                                                    query_sijs=query_sijs)
+                if query_representations is None:
+                    obj = submodlib.GraphCutMutualInformationFunction(n=partition_train_rep.shape[0],
+                                                                        num_queries=partition_query_rep.shape[0],
+                                                                        query_sijs=query_sijs)
+                else:
+                    obj = submodlib.GraphCutMutualInformationFunction(n=partition_train_rep.shape[0],
+                                                                        num_queries=query_representations.shape[0],
+                                                                        query_sijs=query_sijs)
 
             greedyList = obj.maximize(budget=partition_budget_split, optimizer=self.optimizer, stopIfZeroGain=self.stopIfZeroGain,
                                         stopIfNegativeGain=self.stopIfNegativeGain, verbose=False)
-
+            del partition_train_rep
+            if query_representations is None:
+                del partition_query_rep
+            del obj
+            del query_sijs
+            if self.smi_func_type in ['fl1mi', 'logdetmi']:
+                del data_sijs
+            if self.smi_func_type in ['logdetmi']:
+                if query_representations is None:
+                    del query_query_sijs
+            self.logger.info("Partition {}: {} greedy queries".format(partition_cnt, len(greedyList)))
+            partition_cnt += 1
             greedyIdxs.extend([x[0] for x in greedyList])
             
         originalIdxs = [self.indices[x] for x in greedyIdxs]

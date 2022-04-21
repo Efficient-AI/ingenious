@@ -3,6 +3,7 @@ import datetime
 import logging
 import math
 import os
+import sys
 import random
 import datasets
 import torch
@@ -22,6 +23,7 @@ from transformers import(
     get_scheduler,
     set_seed
 )
+import psutil
 import time
 from transformers.utils.versions import require_version
 from cords.selectionstrategies.SL import SMIStrategy
@@ -678,10 +680,13 @@ def main():
                     else:
                         init_subset_indices = [[]]
                 elif args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi']:
-                    pbar = tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
+                    pbar = tqdm(range(math.ceil(len(full_dataloader)/accelerator.num_processes)), disable=not accelerator.is_local_main_process)
                     model.eval()
                     representations = []
                     batch_indices = []
+                    total_cnt = 0
+                    total_storage = 0
+                    
                     for step, batch in enumerate(full_dataloader):
                         with torch.no_grad():
                             output=model(**batch, output_hidden_states=True)
@@ -691,22 +696,38 @@ def main():
                         mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
                         mask=mask*mask1
                         mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
-                        representations.append(accelerator.gather(mean_pooled))
+                        mean_pooled = accelerator.gather(mean_pooled)
+                        total_cnt += mean_pooled.size(0)
+                        print(mean_pooled.shape)
+                        if accelerator.is_main_process:
+                            mean_pooled = mean_pooled.cpu()
+                            total_storage += sys.getsizeof(mean_pooled.storage())
+                            representations.append(mean_pooled)
                         pbar.update(1)
-                    # batch_indices=torch.cat(batch_indices)
-                    # batch_indices = batch_indices[:len(full_dataset)]
-                    # batch_indices = batch_indices.cpu().tolist()
-                    batch_indices=list(range(len(full_dataset)))
-                    logger.info('Length of indices: {}'.format(len(batch_indices)))
-                    representations=torch.cat(representations, dim = 0)
-                    representations=representations[:len(full_dataset)]
-                    representations = representations.cpu().detach().numpy()
-                    logger.info('Representations gathered. Shape of representations: {}'.format(representations.shape))
+
                     if accelerator.is_main_process:
-                        subset_strategy.update_representations(representations, None, batch_indices)
-                        init_subset_indices = [subset_strategy.select(num_samples)]
+                        # representations = torch.rand(41543424, 768)
+                        representations=torch.cat(representations, dim = 0)
+                        representations = representations[:len(full_dataset)]
+                        representations = representations.numpy()
+                        total_storage += sys.getsizeof(representations.storage())
+                        logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
+                        # batch_indices=torch.cat(batch_indices)
+                        # batch_indices = batch_indices[:len(full_dataset)]
+                        # batch_indices = batch_indices.cpu().tolist()
+                        batch_indices=list(range(len(full_dataset)))
+                        logger.info('Length of indices: {}'.format(len(batch_indices)))
+                        logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
+                    
+                    if accelerator.is_main_process:
+                        # subset_strategy.update_representations(representations, None, batch_indices)
+                        init_subset_indices = [subset_strategy.select(num_samples, batch_indices, representations)]
                     else:
                         init_subset_indices = [[]]
+
+                    del representations
+                    del batch_indices
+
                 accelerator.wait_for_everyone()
                 broadcast_object_list(init_subset_indices)
                 subset_dataset = full_dataset.select(init_subset_indices[0])
