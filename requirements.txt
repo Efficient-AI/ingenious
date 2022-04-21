@@ -5,5 +5,8 @@ transformers
 sentencepiece != 0.1.92
 accelerate
 tokenizers
+torch
 scipy
 sklearn
+matplotlib
+apricot-select

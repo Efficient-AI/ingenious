@@ -1,8 +1,13 @@
 # LM-pretraining
 ## Efficient Pretraining of Language Models
-
-### How to Run?
-#### Configuring the accelerate library according to the trianing environment
+### Environment Setup
+#### Run the following commands in a sequence
+- `conda create -n ingenious -c rapidsai -c nvidia -c conda-forge cuml=22.02 python=3.8 cudatoolkit=11.4`
+- `conda activate ingenious`
+- `pip3 install -r requirements.txt`
+- `pip3 install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ submodlib
+`
+#### Configuring the accelerate library according to the training environment
 Run `accelerate config` and answer the following questions
 An example is given below
 - In which compute environment are you running? ([0] This machine, [1] AWS (Amazon SageMaker)): **0**
@@ -12,8 +17,9 @@ An example is given below
 - How many processes in total will you use? [1]: **4**
 - Do you wish to use FP16 (mixed precision)? [yes/NO]: **yes**
 
-#### On a sample dataset
-- Run `python3 prepare_sample.py` (It downloads `wikitext-2-raw-v1`)
+##### Change the required parameters in `train_sample.py` or `train_BERT.py` 
+### On a sample dataset
+- Run `python3 prepare_sample.py` (It downloads `wikitext-103-raw-v1`)
 - Run `python3 train_sample.py` trains tokenizer on data, and then trains BERT from scratch for 3 epochs)
 #### On the Bookcorpus + English Wikipedia dataset
 - Prepare the dataset by running `python3 prepare_bookcorpus_wiki.py`

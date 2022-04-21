@@ -29,6 +29,12 @@ def main():
         "--mlm_probability" ,"0.15",
         "--short_seq_prob", "0.1",
         "--nsp_probability", "0.5",
+        "--select_every", "100",
+        "--partition_strategy", "random",
+        "--num_partitions", "3",
+        "--selection_strategy", "flcg",
+        "--private_partitions", "5",
+        "--save_every", "100",
     ]
     subprocess.run(l)
     models=os.listdir(model_dir)
