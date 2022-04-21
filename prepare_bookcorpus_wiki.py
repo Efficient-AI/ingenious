@@ -22,6 +22,18 @@ def main():
     bookcorpus=datasets.concatenate_datasets([bookcorpus1, bookcorpus2])
     wiki=datasets.load_dataset("wikipedia", "20200501.en", split="train")
     wiki=wiki.remove_columns(['title'])
+    def break_sents(examples):
+        l=[]
+        for sent in examples["text"]:
+            i=0
+            words=sent.split(" ")
+            while i<len(words):
+                s=" ".join(words[i:i+64])
+                if s!="":
+                    l.append(s)
+                i+=64
+        return {"text":l}
+    wiki=wiki.map(break_sents, batched=True, num_proc=12)
     bert_dataset=datasets.concatenate_datasets([wiki, bookcorpus])
     bert_dataset=bert_dataset.train_test_split(test_size=args.validation_split_percentage/100, shuffle=False)
     bert_dataset=datasets.DatasetDict({"train":bert_dataset["train"], "validation": bert_dataset["test"]})

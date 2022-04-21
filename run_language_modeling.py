@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument(
         "--preprocessed",
         action="store_true",
-        help="If passed, it is assumed that no pre-processing is required on the dataset"
+        help="If passed, it is assumed that the dataset is already prepared and processed"
     )
     parser.add_argument(
         "--load_data_from_disk",
@@ -320,8 +320,9 @@ def main():
                 f"model ({tokenizer.model_max_length}). Using max_seq_length={tokenizer.model_max_length}."
             )
         max_seq_length=min(args.max_seq_length, tokenizer.model_max_length)
+    logger.info(f"Beginning Tokenization.")
+
     if not args.preprocessed:
-        logger.info(f"Beginning Tokenization.")
         if args.line_by_line:
             #when using line_by_line, we just tokenize each non-empty line.
             padding="max_length" if args.pad_to_max_length else False
@@ -505,7 +506,10 @@ def main():
                     with_indices=True,
                     desc=f"Grouping texts in chunks of {max_seq_length}",
                 )
-
+    else:
+        dataset=load_from_disk(args.data_directory)
+        train_dataset=dataset["train"]
+        eval_dataset=dataset["validation"]
     # Log a few random samples from the training data
     for index in random.sample(range(len(train_dataset)), 3):
         logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
