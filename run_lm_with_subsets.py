@@ -710,7 +710,7 @@ def main():
                         representations=torch.cat(representations, dim = 0)
                         representations = representations[:len(full_dataset)]
                         representations = representations.numpy()
-                        total_storage += sys.getsizeof(representations.storage())
+                        #total_storage += sys.getsizeof(representations.storage())
                         logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
                         # batch_indices=torch.cat(batch_indices)
                         # batch_indices = batch_indices[:len(full_dataset)]
