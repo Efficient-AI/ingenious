@@ -1,4 +1,6 @@
 import math
+from operator import gt
+import re
 import numpy as np
 import torch
 import time
@@ -83,7 +85,8 @@ class SMIStrategy():
             partition_indices.append(random_indices[i*partition_size:(i+1)*partition_size])
         return partition_indices
 
-    def select(self, budget, indices, representations, query_representations=None):
+    def select(self, budget, indices, representations, query_representations=None, 
+                private_representations=None, private_partitions=5):
         """
 
         Parameters
@@ -126,13 +129,22 @@ class SMIStrategy():
                 query_sijs = submodlib.helper.create_kernel(X=query_representations, X_rep=partition_train_rep, 
                                                             metric=self.metric, method='sklearn')
             
-            if self.smi_func_type in ['fl1mi', 'logdetmi']:
+            if self.smi_func_type in ['fl1mi', 'logdetmi', 'flcg', 'fl', 'logdetcg', 'logdet', 'gc', 'gccg']:
                 if query_representations is None:
                     data_sijs = query_sijs
                 else:
                     data_sijs = submodlib.helper.create_kernel(X=partition_train_rep, metric=self.metric,
                                                             method='sklearn')
             
+            
+            if self.smi_func_type in ['flcg', 'logdetcg', 'gccg']:
+                if private_representations is not None:
+                    private_sijs = submodlib.helper.create_kernel(X=private_representations, X_rep=partition_train_rep, 
+                                                            metric=self.metric, method='sklearn')
+                    if self.smi_func_type in ['logdetcg']:
+                        private_private_sijs = submodlib.helper.create_kernel(X=private_representations,
+                                                            metric=self.metric, method='sklearn')
+
             if self.smi_func_type in ['logdetmi']:
                 if query_representations is None:
                     query_query_sijs = query_sijs
@@ -151,6 +163,7 @@ class SMIStrategy():
                                                                 data_sijs=data_sijs,
                                                                 query_sijs=query_sijs,
                                                                 magnificationEta=self.eta)               
+            
             if self.smi_func_type == 'fl2mi':
                 if query_representations is None:
                     obj = submodlib.FacilityLocationVariantMutualInformationFunction(n=partition_train_rep.shape[0],
@@ -182,6 +195,7 @@ class SMIStrategy():
                                                                         query_query_sijs=query_query_sijs,
                                                                         magnificationEta=self.eta
                                                                         )
+            
             if self.smi_func_type == 'gcmi':
                 if query_representations is None:
                     obj = submodlib.GraphCutMutualInformationFunction(n=partition_train_rep.shape[0],
@@ -192,23 +206,137 @@ class SMIStrategy():
                                                                         num_queries=query_representations.shape[0],
                                                                         query_sijs=query_sijs)
 
-            greedyList = obj.maximize(budget=partition_budget_split, optimizer=self.optimizer, stopIfZeroGain=self.stopIfZeroGain,
+            if self.smi_func_type == 'fl':
+                obj = submodlib.FacilityLocationFunction(n = partition_train_rep.shape[0],
+                                                        separate_rep=False,
+                                                        mode = 'dense',
+                                                        sijs = data_sijs)
+
+            if self.smi_func_type == 'logdet':
+                obj = submodlib.LogDeterminantFunction(n = partition_train_rep.shape[0],
+                                                        mode = 'dense',
+                                                        lambdaVal = 1,
+                                                        sijs = data_sijs)
+            
+            if self.smi_func_type == 'gc':
+                obj = submodlib.GraphCutFunction(n = partition_train_rep.shape[0],
+                                                mode = 'dense',
+                                                lambdaVal = 1,
+                                                seperate_rep=False,
+                                                ggsijs = data_sijs)
+            
+            if self.smi_func_type == 'flcg':
+                if private_representations is not None:
+                    obj = submodlib.FacilityLocationConditionalGainFunction(n=partition_train_rep.shape[0], 
+                                                                            num_privates=private_representations.shape[0],
+                                                                            data_sijs=data_sijs,
+                                                                            private_sijs=private_sijs)
+                                                    
+
+            if self.smi_func_type == 'logdetcg':
+                if private_representations is not None:
+                    obj = submodlib.LogDeterminantConditionalGainFunction(n=partition_train_rep.shape[0], 
+                                                                          num_privates=private_representations.shape[0],
+                                                                          lambdaVal=1,
+                                                                          data_sijs=data_sijs,
+                                                                          private_sijs=private_sijs)
+
+            if self.smi_func_type == 'gccg':
+                if private_representations is not None:
+                    obj = submodlib.GraphCutConditionalGainFunction(n=partition_train_rep.shape[0], 
+                                                                    num_privates=private_representations.shape[0],
+                                                                    lambdaVal=1,
+                                                                    data_sijs=data_sijs,
+                                                                    private_sijs=private_sijs)
+
+
+            if (self.smi_func_type in ['flcg', 'gccg', 'logdetcg']) and (private_representations is None):
+                greedyList = []
+                private_idxs = []
+                private_partition_budget_split = [math.floor(partition_budget_split/private_partitions) for _ in range(private_partitions)]
+                rem_budget = partition_budget_split - sum(private_partition_budget_split)
+                for i in range(rem_budget):
+                    private_partition_budget_split[i] += 1
+
+                if self.smi_func_type == 'flcg':
+                    obj = submodlib.FacilityLocationFunction(n = partition_train_rep.shape[0],
+                                                            mode = 'dense',
+                                                            separate_rep=False,
+                                                            sijs = data_sijs)
+                elif self.smi_func_type == 'gccg':
+                    obj = submodlib.GraphCutFunction(n = partition_train_rep.shape[0],
+                                                    mode = 'dense',
+                                                    lambdaVal=1,
+                                                    separate_rep=False,
+                                                    ggsijs = data_sijs)
+                else: 
+                    obj = submodlib.LogDeterminantFunction(n = partition_train_rep.shape[0],
+                                                        mode = 'dense',
+                                                        lambdaVal = 1,
+                                                        sijs = data_sijs)
+                
+                temp = obj.maximize(budget=private_partition_budget_split[0], optimizer=self.optimizer, 
+                                    stopIfZeroGain=self.stopIfZeroGain, stopIfNegativeGain=self.stopIfNegativeGain, verbose=False)
+
+                [greedyList.append(temp[i]) for i in range(len(temp))]
+                [private_idxs.append(temp[i][0]) for i in range(len(temp))]
+                for i in range(1, private_partitions):
+                    rem_idxs = [idx for idx in range(partition_train_rep.shape[0]) if idx not in private_idxs]
+                    private_sijs = data_sijs[rem_idxs]
+                    private_sijs = private_sijs[:, private_idxs]
+                    gt_data_sijs = data_sijs[rem_idxs]
+                    gt_data_sijs = gt_data_sijs[:, rem_idxs]
+                    
+                    if self.smi_func_type == 'flcg':
+                        obj = submodlib.FacilityLocationConditionalGainFunction(n=gt_data_sijs.shape[0], 
+                                                                            num_privates=private_sijs.shape[1],
+                                                                            data_sijs=gt_data_sijs,
+                                                                            private_sijs=private_sijs)
+                    elif self.smi_func_type == 'gccg':
+                        obj = submodlib.GraphCutConditionalGainFunction(n=gt_data_sijs.shape[0], 
+                                                                        num_privates=private_sijs.shape[1],
+                                                                        lambdaVal=1,
+                                                                        data_sijs=gt_data_sijs,
+                                                                        private_sijs=private_sijs)
+                    else:
+                        private_private_sijs = data_sijs[private_idxs]
+                        private_private_sijs = private_private_sijs[:, private_idxs]
+                        obj = submodlib.LogDeterminantConditionalGainFunction(n=gt_data_sijs.shape[0], 
+                                                                        num_privates=private_sijs.shape[1],
+                                                                        lambdaVal=1,
+                                                                        data_sijs=gt_data_sijs,
+                                                                        private_sijs=private_sijs,
+                                                                        private_private_sijs=private_private_sijs)
+
+                    temp = obj.maximize(budget=private_partition_budget_split[i], optimizer=self.optimizer, stopIfZeroGain=self.stopIfZeroGain,
+                                    stopIfNegativeGain=self.stopIfNegativeGain, verbose=False)
+                    temp =list(temp)
+                    [greedyList.append((rem_idxs[temp[i][0]], temp[i][1])) for i in range(len(temp))]
+                    [private_idxs.append(rem_idxs[temp[i][0]]) for i in range(len(temp))]
+                    del private_sijs
+                    del gt_data_sijs
+                    del obj
+                    if self.smi_func_type == 'logdetcg':
+                        del private_private_sijs
+                    obj = []
+            else:
+                greedyList = obj.maximize(budget=partition_budget_split, optimizer=self.optimizer, stopIfZeroGain=self.stopIfZeroGain,
                                         stopIfNegativeGain=self.stopIfNegativeGain, verbose=False)
             del partition_train_rep
             if query_representations is None:
                 del partition_query_rep
             del obj
             del query_sijs
-            if self.smi_func_type in ['fl1mi', 'logdetmi']:
+            if self.smi_func_type in ['fl1mi', 'logdetmi', 'flcg']:
                 del data_sijs
             if self.smi_func_type in ['logdetmi']:
                 if query_representations is None:
                     del query_query_sijs
             self.logger.info("Partition {}: {} greedy queries".format(partition_cnt, len(greedyList)))
             partition_cnt += 1
-            greedyIdxs.extend([x[0] for x in greedyList])
-            
-        originalIdxs = [self.indices[x] for x in greedyIdxs]
+            greedyIdxs.extend([partition[x[0]] for x in greedyList])  
+        originalIdxs = [indices[x] for x in greedyIdxs]
+        assert len(set(originalIdxs)) == (partition_budget_split * self.num_partitions), "Selected subset must be equal to the budget"
         smi_end_time = time.time()
         self.logger.info("SMI algorithm Subset Selection time is: %.4f", smi_end_time - smi_start_time)
         return originalIdxs

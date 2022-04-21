@@ -608,7 +608,7 @@ def main():
         num_training_steps=args.max_train_steps,
     )
 
-    if args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi']:
+    if args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
         subset_strategy = SMIStrategy(None, None,
                                     None, logger, args.selection_strategy,
                                     num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
@@ -679,7 +679,7 @@ def main():
                         init_subset_indices = [random.sample(list(range(len(full_dataset))), num_samples)]
                     else:
                         init_subset_indices = [[]]
-                elif args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi']:
+                elif args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
                     pbar = tqdm(range(math.ceil(len(full_dataloader)/accelerator.num_processes)), disable=not accelerator.is_local_main_process)
                     model.eval()
                     representations = []
@@ -698,7 +698,6 @@ def main():
                         mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
                         mean_pooled = accelerator.gather(mean_pooled)
                         total_cnt += mean_pooled.size(0)
-                        print(mean_pooled.shape)
                         if accelerator.is_main_process:
                             mean_pooled = mean_pooled.cpu()
                             total_storage += sys.getsizeof(mean_pooled.storage())
