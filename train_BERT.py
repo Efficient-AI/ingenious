@@ -9,7 +9,7 @@ def main():
     model_dir="./models/BERT_"+timestamp +"/"
     os.makedirs(log_dir)
     l=[
-        "accelerate", "launch", "run_language_modeling.py",
+        "accelerate", "launch", "run_lm_with_subsets.py",
         "--preprocessed",
         "--log_file", log_dir+"train.log",
         "--load_data_from_disk",
