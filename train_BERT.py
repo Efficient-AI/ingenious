@@ -8,17 +8,18 @@ def main():
     log_dir="./logs/bert_subsets_random_logs_"+timestamp+"/"
     model_dir="./models/BERT_"+timestamp +"/"
     os.makedirs(log_dir)
+    #os.makedirs(model_dir)
     l=[
         "accelerate", "launch", "run_lm_with_subsets.py",
         "--preprocessed",
         "--log_dir", log_dir,
         "--load_data_from_disk",
-        "--data_directory", "./bert_dataset_prepared",
+        "--data_directory", "/home/kk/data/bert_dataset_prepared",
         "--tokenizer_name", "bert-base-uncased",
         "--vocab_size", "30522",
         "--preprocess_batch_size", "2000",
-        "--per_device_train_batch_size", "256",
-        "--per_device_eval_batch_size", "256",
+        "--per_device_train_batch_size", "32",
+        "--per_device_eval_batch_size", "32",
         "--learning_rate", "1e-4",
         "--weight_decay" ,"0.01",
         "--max_train_steps", "1000000",
@@ -30,11 +31,11 @@ def main():
         "--mlm_probability" ,"0.15",
         "--short_seq_prob", "0.1",
         "--nsp_probability", "0.5",
-        "--select_every", "100000",
+        "--select_every", "1",
         "--partition_strategy", "random",
-        "--num_partitions", "1000",
-        "--selection_strategy", "flcg",
-        "--private_partitions", "5",
+        "--num_partitions", "5000",
+        "--selection_strategy", "fl",
+        "--parallel_processes", "50",
         "--save_every", "100000",
     ]
     subprocess.run(l)
