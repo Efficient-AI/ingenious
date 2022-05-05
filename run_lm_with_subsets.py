@@ -209,7 +209,7 @@ def parse_args():
         "--num_partitions", type=int, default=1000, help="Number of partitions in subset selection"
     )
     parser.add_argument(
-        "--private_partitions", type=int, default=5, help="Number of private partitions using CG functions in subset selection"
+        "--parallel_processes", type=int, default=50, help="Number of parallel processes for subset selection"
     )
     parser.add_argument(
         "--save_every", type=int, default=100000, help="Save the model checkpoint after training for every save_every training steps"
@@ -612,10 +612,9 @@ def main():
     )
 
     if args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
-        subset_strategy = SMIStrategy(None, None,
-                                    None, logger, args.selection_strategy,
+        subset_strategy = SMIStrategy(logger, args.selection_strategy,
                                     num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
-                                    optimizer='LazyGreedy', similarity_criterion='feature', 
+                                    optimizer='LazierThanLazyGreedy', similarity_criterion='feature', 
                                     metric='cosine', eta=1, stopIfZeroGain=False, 
                                     stopIfNegativeGain=False, verbose=False, lambdaVal=1)
     # Train!
@@ -708,11 +707,11 @@ def main():
                         pbar.update(1)
 
                     if accelerator.is_main_process:
-                        # representations = torch.rand(41543424, 768)
+                        #representations = torch.rand(41543424, 768)
                         representations=torch.cat(representations, dim = 0)
                         representations = representations[:len(full_dataset)]
+                        total_storage += sys.getsizeof(representations.storage())
                         representations = representations.numpy()
-                        #total_storage += sys.getsizeof(representations.storage())
                         logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
                         # batch_indices=torch.cat(batch_indices)
                         # batch_indices = batch_indices[:len(full_dataset)]
@@ -723,8 +722,7 @@ def main():
                     
                     if accelerator.is_main_process:
                         # subset_strategy.update_representations(representations, None, batch_indices)
-                        init_subset_indices = [subset_strategy.select(num_samples, batch_indices, 
-                                                representations, private_partitions=args.private_partitions)]
+                        init_subset_indices = [subset_strategy.select(num_samples, batch_indices, representations, parallel_processes=args.parallel_processes)]
                     else:
                         init_subset_indices = [[]]
 
