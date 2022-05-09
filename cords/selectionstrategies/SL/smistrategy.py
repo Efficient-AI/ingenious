@@ -13,7 +13,7 @@ import submodlib
 from multiprocessing import Pool
 from itertools import starmap
 import tqdm
-from p_tqdm import p_umap
+#from p_tqdm import p_umap
 # from cuml.cluster import KMeans
 # from submodlib import FacilityLocationMutualInformationFunction, FacilityLocationVariantMutualInformationFunction
 

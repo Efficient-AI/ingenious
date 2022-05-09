@@ -15,7 +15,7 @@ def main():
     dataset=dataset.remove_columns(["special_tokens_mask","next_sentence_label"])
     dataset.set_format("torch")
     data_collator=DataCollatorWithPadding(tokenizer=tokenizer)
-    dataloader=DataLoader(dataset, collate_fn=data_collator, batch_size=512)
+    dataloader=DataLoader(dataset, collate_fn=data_collator, batch_size=256)
 
     model, dataloader=accelerator.prepare(model, dataloader)
 

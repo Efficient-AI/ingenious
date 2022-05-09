@@ -8,37 +8,38 @@ def main():
     log_dir="./logs/sample_bert_logs_"+timestamp+"/"
     model_dir="./models/sample_BERT_"+timestamp +"/"
     os.makedirs(log_dir)
+    #os.makedirs(model_dir)
     l=[
-        "accelerate", "launch", "run_language_modeling.py",
-        "--log_file", log_dir+"train.log",
+        "accelerate", "launch", "run_lm_with_subsets.py",
+        "--log_dir", log_dir,
         "--load_data_from_disk",
         "--data_directory", "./wikitext-2-raw-v1",
         "--tokenizer_name", "bert-base-uncased",
         "--vocab_size", "30522",
-        "--preprocess_batch_size", "1000",
+        "--preprocess_batch_size", "2000",
         "--per_device_train_batch_size", "8",
         "--per_device_eval_batch_size", "8",
         "--learning_rate", "1e-4",
         "--weight_decay" ,"0.01",
-        "--num_train_epochs", "1",
+        "--num_train_epochs", "3",
         "--gradient_accumulation_steps", "1",
         "--num_warmup_steps", "0",
         "--output_dir", model_dir,
         "--max_seq_length", "128",
-        "--preprocessing_num_workers", "12",
+        "--preprocessing_num_workers", "96",
         "--mlm_probability" ,"0.15",
         "--short_seq_prob", "0.1",
         "--nsp_probability", "0.5",
         "--select_every", "100",
         "--partition_strategy", "random",
         "--num_partitions", "3",
-        "--selection_strategy", "flcg",
-        "--private_partitions", "5",
+        "--selection_strategy", "fl",
+        "--parallel_processes", "12",
         "--save_every", "100",
     ]
     subprocess.run(l)
     models=os.listdir(model_dir)
-    model_name_or_path=model_dir+"model_checkpoint_epoch_"+str(max([int(i.split("_")[-1]) for i in models]))
+    model_name_or_path=model_dir+"model_checkpoint_"+str(max([int(i.split("_")[-1]) for i in models]))
     tasks=["cola", "mrpc", "rte", "stsb", "wnli"] #can also add "mnli", "qnli", "qqp", "sst2" 
     glue_log_dir=log_dir+"glue/"
     os.makedirs(glue_log_dir)

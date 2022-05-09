@@ -6,3 +6,7 @@ bookcorpus.tar.bz2
 /bert_dataset
 /logs/
 /models/
+/bert_dataset_prepared/
+/old-logs/
+/submodlib/
+/ingenious-env/

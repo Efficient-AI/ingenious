@@ -666,7 +666,7 @@ def main():
                     accelerator.wait_for_everyone()
                     unwrapped_model=accelerator.unwrap_model(model)
                     dir_path=args.output_dir+"model_checkpoint_{}".format((1+completed_steps)//args.save_every)
-                    unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process,  save_function=accelerator.save)
+                    unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
                     accelerator.save_state(dir_path)
                     if accelerator.is_main_process:
                         tokenizer.save_pretrained(dir_path)
@@ -768,7 +768,7 @@ def main():
         unwrapped_model=accelerator.unwrap_model(model)
         dir_path=args.output_dir+"model_checkpoint_{}".format(args.max_train_steps//args.save_every)
         accelerator.save_state(dir_path)
-        unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process, save_function=accelerator.save)
+        unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
         if accelerator.is_main_process:
             tokenizer.save_pretrained(dir_path)
 
