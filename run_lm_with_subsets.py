@@ -220,7 +220,7 @@ def parse_args():
 
 def main():
     args=parse_args()
-    torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=25000))
+    torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=75000))
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     accelerator=Accelerator()
     # Make one log on every process with the configuration for debugging

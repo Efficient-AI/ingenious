@@ -22,6 +22,7 @@ from transformers import(
     get_scheduler,
     set_seed
 )
+import time
 from transformers.utils.versions import require_version
 
 logger=logging.getLogger(__name__)
@@ -189,6 +190,9 @@ def parse_args():
     parser.add_argument(
         "--nsp_probability", type=float, default=0.5, help="Fraction of incorrect sentence pairs in all of the input"
     )
+    parser.add_argument(
+        "--save_every", type=int, default=100000, help="Save the model checkpoint after training for every save_every training steps"
+    )
     args=parser.parse_args()
 
     return args
@@ -201,7 +205,7 @@ def main():
     accelerator=Accelerator()
     # Make one log on every process with the configuration for debugging
     logging.basicConfig(
-        filename=args.log_file,
+        filename=args.log_dir+"/train_logs.log",
         filemode="w",
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -320,9 +324,9 @@ def main():
                 f"model ({tokenizer.model_max_length}). Using max_seq_length={tokenizer.model_max_length}."
             )
         max_seq_length=min(args.max_seq_length, tokenizer.model_max_length)
-    logger.info(f"Beginning Tokenization.")
-
+    
     if not args.preprocessed:
+        logger.info(f"Beginning Tokenization.")
         if args.line_by_line:
             #when using line_by_line, we just tokenize each non-empty line.
             padding="max_length" if args.pad_to_max_length else False
@@ -581,7 +585,9 @@ def main():
     progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
     logger.info(f"Creating directories for various checkpoints.")
-
+    if accelerator.is_main_process:
+        for i in range(args.max_train_steps//args.save_every):
+            os.makedirs(args.output_dir+"/model_checkpoint_{}".format(1+i))
     accelerator.wait_for_everyone()
     logger.info(f"Begin the training.")
     for epoch in range(args.num_train_epochs):
@@ -603,6 +609,20 @@ def main():
                 
             if (1+step)%100==0:
                 logger.info(f"Done with {completed_steps} steps and currently in epoch #{epoch+1}.")
+            
+            if (1+completed_steps)%args.save_every==0:
+                if args.output_dir is not None:
+                    try:
+                        logger.info(f"saving the model after #{1+completed_steps} steps")
+                        accelerator.wait_for_everyone()
+                        unwrapped_model=accelerator.unwrap_model(model)
+                        dir_path=args.output_dir+"model_checkpoint_{}".format((1+completed_steps)//args.save_every)
+                        unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process, save_function=accelerator.save)
+                        accelerator.save_state(dir_path)
+                        if accelerator.is_main_process:
+                            tokenizer.save_pretrained(dir_path)
+                    except:
+                        pass
 
         model.eval()
         losses=[]
@@ -620,29 +640,31 @@ def main():
         except OverflowError:
             perplexity=float("inf")
         
-        logger.info(f"epoch {epoch}: perplexity: {perplexity}")
+        logger.info(f"Steps {completed_steps}: perplexity: {perplexity}")
         
-        if epoch<args.num_train_epochs-1:
-            if args.output_dir is not None:
-                logger.info(f"saving model after epoch #{epoch+1}")
-                accelerator.wait_for_everyone()
-                unwrapped_model=accelerator.unwrap_model(model)
-                dir_path=args.output_dir+"/model_checkpoint_epoch_{}".format(epoch+1)
-                if accelerator.is_main_process:
-                    os.makedirs(dir_path, exist_ok=True)
-                unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
-                if accelerator.is_main_process:
-                    tokenizer.save_pretrained(dir_path)
-    logger.info(f"Saving the final model after epoch #{epoch+1} and {completed_steps} steps.")
+        # if epoch<args.num_train_epochs-1:
+        #     if args.output_dir is not None:
+        #         logger.info(f"saving model after epoch #{epoch+1}")
+        #         accelerator.wait_for_everyone()
+        #         unwrapped_model=accelerator.unwrap_model(model)
+        #         dir_path=args.output_dir+"/model_checkpoint_epoch_{}".format(epoch+1)
+        #         if accelerator.is_main_process:
+        #             os.makedirs(dir_path, exist_ok=True)
+        #         unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
+        #         if accelerator.is_main_process:
+        #             tokenizer.save_pretrained(dir_path)
+    logger.info(f"Saving the final model after {completed_steps} steps.")
     if args.output_dir is not None:
-        accelerator.wait_for_everyone()
-        unwrapped_model=accelerator.unwrap_model(model)
-        dir_path=args.output_dir+"/model_checkpoint_epoch_{}".format(args.num_train_epochs)
-        if accelerator.is_main_process:
-            os.makedirs(dir_path, exist_ok=True)
-        unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
-        if accelerator.is_main_process:
-            tokenizer.save_pretrained(dir_path)
+        try:
+            accelerator.wait_for_everyone()
+            unwrapped_model=accelerator.unwrap_model(model)
+            dir_path=args.output_dir+"model_checkpoint_{}".format(args.max_train_steps//args.save_every)
+            unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
+            accelerator.save_state(dir_path)
+            if accelerator.is_main_process:
+                tokenizer.save_pretrained(dir_path)
+        except:
+            pass
 
 if __name__=="__main__":
     main()

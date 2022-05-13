@@ -5,12 +5,12 @@ from datetime import datetime
 def main():
     now=datetime.now()
     timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
-    log_dir="./logs/bert_logs_"+timestamp+"/"
-    model_dir="./models/BERT_"+timestamp +"/"
+    log_dir="./logs/regular_bert_logs_"+timestamp+"/"
+    model_dir="./models/regular_bert_"+timestamp +"/"
     os.makedirs(log_dir)
     #os.makedirs(model_dir)
     l=[
-        "accelerate", "launch", "run_lm_with_subsets.py",
+        "accelerate", "launch", "run_language_modeling.py",
         "--preprocessed",
         "--log_dir", log_dir,
         "--load_data_from_disk",
@@ -31,16 +31,16 @@ def main():
         "--mlm_probability" ,"0.15",
         "--short_seq_prob", "0.1",
         "--nsp_probability", "0.5",
-        "--select_every", "100000",
-        "--partition_strategy", "random",
-        "--num_partitions", "5000",
-        "--selection_strategy", "fl",
-        "--parallel_processes", "96",
+        # "--select_every", "25000",
+        # "--partition_strategy", "random",
+        # "--num_partitions", "5000",
+        # "--selection_strategy", "fl",
+        # "--parallel_processes", "96",
         "--save_every", "100000",
     ]
     subprocess.run(l)
     models=os.listdir(model_dir)
-    model_name_or_path=model_dir+"model_checkpoint_epoch_"+str(max([int(i.split("_")[-1]) for i in models]))
+    model_name_or_path=model_dir+"model_checkpoint_"+str(max([int(i.split("_")[-1]) for i in models]))
     tasks=["cola", "mrpc", "rte", "stsb", "wnli"] #can also add "mnli", "qnli", "qqp", "sst2" 
     glue_log_dir=log_dir+"glue/"
     os.makedirs(glue_log_dir)
