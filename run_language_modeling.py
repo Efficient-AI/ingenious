@@ -591,7 +591,7 @@ def main():
         num_training_steps=args.max_train_steps,
     )
 
-    logger.info("Prepare model, optimizer, train_dataloader, eval_dataloader with accelerate.")
+    logger.info("Prepare model, optimizer, train_dataloader, eval_dataloader, lr_scheduler with accelerate.")
     # Prepare everything with our `accelerator`
     model, optimizer, train_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, eval_dataloader, lr_scheduler

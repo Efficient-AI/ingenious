@@ -7,6 +7,7 @@ bookcorpus.tar.bz2
 /bert_dataset
 /logs/
 /models/
+/subsets/
 /bert_dataset_prepared/
 /old-logs/
 /submodlib/
