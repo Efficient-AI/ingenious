@@ -1,5 +1,7 @@
 import argparse
+import json
 import datetime
+import time
 import logging
 import math
 import os
@@ -13,19 +15,19 @@ from tqdm.auto import tqdm
 
 import transformers
 from accelerate import Accelerator, DistributedType
+from accelerate.logging import get_logger
+from accelerate.utils import set_seed
 from transformers import(
     BertConfig,
     BertTokenizerFast,
     BertForPreTraining,
     DataCollatorForLanguageModeling,
     SchedulerType,
-    get_scheduler,
-    set_seed
+    get_scheduler
 )
-import time
 from transformers.utils.versions import require_version
 
-logger=logging.getLogger(__name__)
+logger=get_logger(__name__)
 require_version("datasets>=1.8.0", "To fix: pip install -r requirements.txt")
 
 def parse_args():
@@ -34,17 +36,17 @@ def parse_args():
         "--log_dir",
         type=str,
         required=True,
-        help="The path to the file into which logs should be written"
+        help="The directory to which logs should be written"
     )
     parser.add_argument(
         "--preprocessed",
         action="store_true",
-        help="If passed, it is assumed that the dataset is already prepared and processed"
+        help="If passed, already preprocessed data needs to be given"
     )
     parser.add_argument(
         "--load_data_from_disk",
         action="store_true",
-        help="If passed, the dataset is loaded from the disk."
+        help="If passed, the dataset is loaded from the disk instead of downloading from the hub"
     )
     parser.add_argument(
         "--data_directory",
@@ -102,7 +104,7 @@ def parse_args():
     parser.add_argument(
         "--vocab_size",
         type=int,
-        default=25000,
+        default=30522,
         help="The size of vocabulary in tokenizer"
     )
     parser.add_argument(
@@ -150,7 +152,7 @@ def parse_args():
         choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
     )
     parser.add_argument(
-        "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler."
+        "--num_warmup_steps", type=int, default=10000, help="Number of steps for the warmup in the lr scheduler."
     )
     parser.add_argument("--output_dir", type=str, default=None, help="Where to store the final model.")
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
@@ -191,7 +193,21 @@ def parse_args():
         "--nsp_probability", type=float, default=0.5, help="Fraction of incorrect sentence pairs in all of the input"
     )
     parser.add_argument(
-        "--save_every", type=int, default=100000, help="Save the model checkpoint after training for every save_every training steps"
+        "--checkpointing_steps",
+        type=str,
+        default=None,
+        help="Whether various states should be saved at the end of every n steps, or 'epoch' for each epoch.",
+    )
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
+        help="If the training should continue from a checkpoint folder",
+    )
+    parser.add_argument(
+        "--with_tracking",
+        action="store_true",
+        help="Whether to load in all available experiment trackers from the environment and use them for logging.",
     )
     args=parser.parse_args()
 
@@ -202,7 +218,8 @@ def main():
     args=parse_args()
     torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=25000))
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
-    accelerator=Accelerator()
+    # If we're using tracking, we also need to initialize it here and it will pick up all supported trackers in the environment
+    accelerator=Accelerator(log_with="all", logging_dir=args.log_dir) if args.with_tracking else Accelerator()
     # Make one log on every process with the configuration for debugging
     logging.basicConfig(
         filename=args.log_dir+"/train_logs.log",
@@ -211,11 +228,11 @@ def main():
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
-    logger.info(accelerator.state)
+    logger.info(accelerator.state, main_process_only=False)
 
     # Setup logging, we only want one process per machine to log things on the screen.
     # accelerator.is_local_main_process is only True for one process per machine.
-    logger.setLevel(logging.INFO if accelerator.is_local_main_process else logging.ERROR)
+    # logger.setLevel(logging.INFO if accelerator.is_local_main_process else logging.ERROR)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
         transformers.utils.logging.set_verbosity_info()
@@ -257,7 +274,11 @@ def main():
             if "validation" not in raw_datasets.keys():
                 raw_datasets=raw_datasets["train"].train_test_split(test_size=(args.validation_split_percentage/100), shuffle=False)
                 raw_datasets=datasets.DatasetDict({"train": raw_datasets["train"], "validation": raw_datasets["test"]})
-    logger.info(f"Loading the model configuration.")
+    # Load pretrained model and tokenizer
+    #
+    # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
+    # download model & vocab.
+    logger.info("Loading the model configuration.")
     if args.config_name:
         config=BertConfig.from_pretrained(args.config_name)
     elif args.model_name_or_path:
@@ -278,7 +299,7 @@ def main():
             layer_norm_eps=1e-12,
             position_embedding_type="absolute",
         )
-    logger.info(f"Loading the tokenizer.")
+    logger.info("Loading the tokenizer.")
     if args.tokenizer_name:
         tokenizer=BertTokenizerFast.from_pretrained(args.tokenizer_name, use_fast=not args.use_slow_tokenizer)
     elif args.model_name_or_path:
@@ -288,7 +309,7 @@ def main():
             "You are instantiating a new tokenizer from scratch. This is not supported by this script."
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
-    logger.info(f"Initializing Model.")
+    logger.info("Initializing Model.")
     if args.model_name_or_path:
         model=BertForPreTraining.from_pretrained(
             args.model_name_or_path,
@@ -296,6 +317,7 @@ def main():
             config=config
         )
     else:
+        logger.info("Training new model from scratch")
         model=BertForPreTraining(config)
 
     model.resize_token_embeddings(len(tokenizer))
@@ -326,7 +348,7 @@ def main():
         max_seq_length=min(args.max_seq_length, tokenizer.model_max_length)
     
     if not args.preprocessed:
-        logger.info(f"Beginning Tokenization.")
+        logger.info("Beginning Tokenization.")
         if args.line_by_line:
             #when using line_by_line, we just tokenize each non-empty line.
             padding="max_length" if args.pad_to_max_length else False
@@ -514,9 +536,12 @@ def main():
         dataset=load_from_disk(args.data_directory)
         train_dataset=dataset["train"]
         eval_dataset=dataset["validation"]
-    # Log a few random samples from the training data
-    for index in random.sample(range(len(train_dataset)), 3):
-        logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
+    
+    # Conditional for small test subsets
+    if len(train_dataset)>3:
+        # Log a few random samples from the training data
+        for index in random.sample(range(len(train_dataset)), 3):
+            logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
 
     # Data Collator
     # This one will take care of the randomly masking the tokens.
@@ -544,11 +569,6 @@ def main():
         }
     ]
     optimizer=AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
-    logger.info(f"Prepare model, optimizer, train_dataloader, eval_dataloader with accelerate.")
-    # Prepare everything with out `accelerator`
-    model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
-        model, optimizer, train_dataloader, eval_dataloader
-    )
 
     # On TPU, the tie weights in our model have been disconnected, so we need to restore the ties.
     if accelerator.distributed_type==DistributedType.TPU:
@@ -571,6 +591,31 @@ def main():
         num_training_steps=args.max_train_steps,
     )
 
+    logger.info("Prepare model, optimizer, train_dataloader, eval_dataloader with accelerate.")
+    # Prepare everything with our `accelerator`
+    model, optimizer, train_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
+        model, optimizer, train_dataloader, eval_dataloader, lr_scheduler
+    )
+
+    # We need to recalculate our total training steps as the size of the training dataloader may have changed.
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+
+    # Figure out how many steps we should save the Accelerator states
+    if hasattr(args.checkpointing_steps, "isdigit"):
+        checkpointing_steps=args.checkpointing_steps
+        if args.checkpointing_steps.isdigit():
+            checkpointing_steps=int(args.checkpointing_steps)
+    else:
+        checkpointing_steps=None
+
+    # We need to initialize the trackers we use and also store our configuration
+    if args.with_tracking:
+        experiment_config=vars(args)
+        # TensorBoard cannot log Enums, need the raw value
+        experiment_config["lr_scheduler_type"]=experiment_config["lr_scheduler_type"].value
+        accelerator.init_trackers("run_language_modeling", experiment_config)
+
     # Train!
     total_batch_size=args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
@@ -584,17 +629,54 @@ def main():
     # Only show the progress bar once on each machine.
     progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
-    logger.info(f"Creating directories for various checkpoints.")
-    if accelerator.is_main_process:
-        for i in range(args.max_train_steps//args.save_every):
-            os.makedirs(args.output_dir+"/model_checkpoint_{}".format(1+i))
-    accelerator.wait_for_everyone()
+    starting_epoch=0
+
+    # logger.info(f"Creating directories for various checkpoints.")
+    # if accelerator.is_main_process:
+    #     for i in range(args.max_train_steps//args.save_every):
+    #         os.makedirs(args.output_dir+"/model_checkpoint_{}".format(1+i))
+    # accelerator.wait_for_everyone()
+
+    # Potentially load in the weights and states from a previous save
+    if args.resume_from_checkpoint:
+        if args.resume_from_checkpoint is not None or args.resume_from_checkpoint != "":
+            accelerator.print(f"Resumed from checkpoint: {args.resume_from_checkpoint}")
+            accelerator.load_state(args.resume_from_checkpoint)
+            path = os.path.basename(args.resume_from_checkpoint)
+        else:
+            # Get the most recent checkpoint
+            dirs = [f.name for f in os.scandir(os.getcwd()) if f.is_dir()]
+            dirs.sort(key=os.path.getctime)
+            path = dirs[-1]  # Sorts folders by date modified, most recent checkpoint is the last
+        # Extract `epoch_{i}` or `step_{i}`
+        training_difference = os.path.splitext(path)[0]
+
+        if "epoch" in training_difference:
+            starting_epoch = int(training_difference.replace("epoch_", "")) + 1
+            resume_step = None
+        else:
+            resume_step = int(training_difference.replace("step_", ""))
+            starting_epoch = resume_step // len(train_dataloader)
+            resume_step -= starting_epoch * len(train_dataloader)
+
     logger.info(f"Begin the training.")
-    for epoch in range(args.num_train_epochs):
+    for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
+        if args.with_tracking:
+            total_loss=0
         for step, batch in enumerate(train_dataloader):
+            # We need to skip steps until we reach the resumed step
+            if args.resume_from_checkpoint and epoch==starting_epoch:
+                if resume_step is not None and step<resume_step:
+                    completed_steps+=1
+                    continue
             outputs=model(**batch)
             loss=outputs.loss
+            # We keep track of the loss at each epoch
+            if args.with_tracking:
+                total_loss+=loss.detach().float()
+            if (1+completed_steps)%10==0:
+                logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}")
             loss=loss/args.gradient_accumulation_steps
             accelerator.backward(loss)
             if step%args.gradient_accumulation_steps==0 or step==len(train_dataloader)-1:
@@ -604,25 +686,32 @@ def main():
                 progress_bar.update(1)
                 completed_steps+=1
             
+            if isinstance(checkpointing_steps, int):
+                if completed_steps%checkpointing_steps==0:
+                    output_dir=f"step_{completed_steps }"
+                    if args.output_dir is not None:
+                        output_dir=os.path.join(args.output_dir, output_dir)
+                    accelerator.save_state(output_dir)
+            
             if completed_steps>=args.max_train_steps:
                 break
                 
-            if (1+step)%100==0:
-                logger.info(f"Done with {completed_steps} steps and currently in epoch #{epoch+1}.")
+            # if completed_steps%100==0:
+            #     logger.info(f"Done with {completed_steps} steps and currently in epoch #{epoch+1}.")
             
-            if (1+completed_steps)%args.save_every==0:
-                if args.output_dir is not None:
-                    try:
-                        logger.info(f"saving the model after #{1+completed_steps} steps")
-                        accelerator.wait_for_everyone()
-                        unwrapped_model=accelerator.unwrap_model(model)
-                        dir_path=args.output_dir+"model_checkpoint_{}".format((1+completed_steps)//args.save_every)
-                        unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process, save_function=accelerator.save)
-                        accelerator.save_state(dir_path)
-                        if accelerator.is_main_process:
-                            tokenizer.save_pretrained(dir_path)
-                    except:
-                        pass
+            # if (1+completed_steps)%args.save_every==0:
+            #     if args.output_dir is not None:
+            #         try:
+            #             logger.info(f"saving the model after #{1+completed_steps} steps")
+            #             accelerator.wait_for_everyone()
+            #             unwrapped_model=accelerator.unwrap_model(model)
+            #             dir_path=args.output_dir+"model_checkpoint_{}".format((1+completed_steps)//args.save_every)
+            #             unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process, save_function=accelerator.save)
+            #             accelerator.save_state(dir_path)
+            #             if accelerator.is_main_process:
+            #                 tokenizer.save_pretrained(dir_path)
+            #         except:
+            #             pass
 
         model.eval()
         losses=[]
@@ -642,6 +731,10 @@ def main():
         
         logger.info(f"Steps {completed_steps}: perplexity: {perplexity}")
         
+        if args.with_tracking:
+            accelerator.log(
+                {"perplexity":perplexity, "train_loss": total_loss, "epoch":epoch, "step":completed_steps},
+            )
         # if epoch<args.num_train_epochs-1:
         #     if args.output_dir is not None:
         #         logger.info(f"saving model after epoch #{epoch+1}")
@@ -653,18 +746,34 @@ def main():
         #         unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
         #         if accelerator.is_main_process:
         #             tokenizer.save_pretrained(dir_path)
+        if args.checkpointing_steps=="epoch":
+            output_dir=f"epoch_{epoch}"
+            if args.output_dir is not None:
+                output_dir=os.path.join(args.output_dir, output_dir)
+                accelerator.save_state(output_dir)
     logger.info(f"Saving the final model after {completed_steps} steps.")
+    # if args.output_dir is not None:
+    #     try:
+    #         accelerator.wait_for_everyone()
+    #         unwrapped_model=accelerator.unwrap_model(model)
+    #         dir_path=args.output_dir+"model_checkpoint_{}".format(args.max_train_steps//args.save_every)
+    #         unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
+    #         accelerator.save_state(dir_path)
+    #         if accelerator.is_main_process:
+    #             tokenizer.save_pretrained(dir_path)
+    #     except:
+    #         pass
     if args.output_dir is not None:
-        try:
-            accelerator.wait_for_everyone()
-            unwrapped_model=accelerator.unwrap_model(model)
-            dir_path=args.output_dir+"model_checkpoint_{}".format(args.max_train_steps//args.save_every)
-            unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
-            accelerator.save_state(dir_path)
-            if accelerator.is_main_process:
-                tokenizer.save_pretrained(dir_path)
-        except:
-            pass
+        accelerator.wait_for_everyone()
+        unwrapped_model=accelerator.unwrap_model(model)
+        unwrapped_model.save_pretrained(
+            args.output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save
+        )
+        if accelerator.is_main_process:
+            tokenizer.save_pretrained(args.output_dir)
+
+        with open(os.path.join(args.output_dir, "all_results.json"), "w") as f:
+            json.dump({"perplexity":perplexity}, f)
 
 if __name__=="__main__":
     main()

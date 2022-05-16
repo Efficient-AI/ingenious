@@ -317,7 +317,8 @@ def main():
             config=config
         )
     else:
-        model=BertForPreTraining(config)
+        # model=BertForPreTraining(config)
+        model=BertForPreTraining.from_pretrained("bert-base-uncased")
 
     model.resize_token_embeddings(len(tokenizer))
     #Preprocessing the datasets
@@ -662,14 +663,17 @@ def main():
 
             if (1+completed_steps)%args.save_every==0:
                 if args.output_dir is not None:
-                    logger.info(f"saving model after #{completed_steps+1} steps")
-                    accelerator.wait_for_everyone()
-                    unwrapped_model=accelerator.unwrap_model(model)
-                    dir_path=args.output_dir+"model_checkpoint_{}".format((1+completed_steps)//args.save_every)
-                    unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process,  save_function=accelerator.save)
-                    accelerator.save_state(dir_path)
-                    if accelerator.is_main_process:
-                        tokenizer.save_pretrained(dir_path)
+                    try:
+                        logger.info(f"saving model after #{completed_steps+1} steps")
+                        accelerator.wait_for_everyone()
+                        unwrapped_model=accelerator.unwrap_model(model)
+                        dir_path=args.output_dir+"model_checkpoint_{}".format((1+completed_steps)//args.save_every)
+                        unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process,  save_function=accelerator.save)
+                        accelerator.save_state(dir_path)
+                        if accelerator.is_main_process:
+                            tokenizer.save_pretrained(dir_path)
+                    except:
+                        pass
 
             if (1+completed_steps)%args.select_every==0:
                 accelerator.wait_for_everyone()
@@ -691,7 +695,7 @@ def main():
                     for step, batch in enumerate(full_dataloader):
                         with torch.no_grad():
                             output=model(**batch, output_hidden_states=True)
-                        embeddings=output['hidden_states'][7]
+                        embeddings=output['hidden_states'][3]
                         #batch_indices.append(accelerator.gather(torch.tensor(list(full_dataloader.batch_sampler)[step]).to(accelerator.device)))
                         mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
                         mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
@@ -764,13 +768,16 @@ def main():
     logger.info(f"Saving the final model after {completed_steps} steps.")
     logger.info(f"Timing: {timing}")
     if args.output_dir is not None:
-        accelerator.wait_for_everyone()
-        unwrapped_model=accelerator.unwrap_model(model)
-        dir_path=args.output_dir+"model_checkpoint_{}".format(args.max_train_steps//args.save_every)
-        accelerator.save_state(dir_path)
-        unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process, save_function=accelerator.save)
-        if accelerator.is_main_process:
-            tokenizer.save_pretrained(dir_path)
+        try:
+            accelerator.wait_for_everyone()
+            unwrapped_model=accelerator.unwrap_model(model)
+            dir_path=args.output_dir+"model_checkpoint_{}".format(args.max_train_steps//args.save_every)
+            accelerator.save_state(dir_path)
+            unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process, save_function=accelerator.save)
+            if accelerator.is_main_process:
+                tokenizer.save_pretrained(dir_path)
+        except:
+            pass
 
 if __name__=="__main__":
     main()

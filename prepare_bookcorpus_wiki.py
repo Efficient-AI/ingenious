@@ -20,8 +20,8 @@ def main():
     bookcorpus1=datasets.Dataset.from_text("books_large_p1.txt")
     bookcorpus2=datasets.Dataset.from_text("books_large_p2.txt")
     bookcorpus=datasets.concatenate_datasets([bookcorpus1, bookcorpus2])
-    wiki=datasets.load_dataset("wikipedia", "20200501.en", split="train")
-    wiki=wiki.remove_columns(['title'])
+    wiki=datasets.load_dataset("wikipedia", "20220301.en", split="train")
+    wiki=wiki.remove_columns(['id', 'url', 'title'])
     def break_sents(examples):
         l=[]
         for sent in examples["text"]:
@@ -33,7 +33,7 @@ def main():
                     l.append(s)
                 i+=64
         return {"text":l}
-    wiki=wiki.map(break_sents, batched=True, num_proc=12)
+    wiki=wiki.map(break_sents, batched=True, num_proc=96)
     bert_dataset=datasets.concatenate_datasets([wiki, bookcorpus])
     bert_dataset=bert_dataset.train_test_split(test_size=args.validation_split_percentage/100, shuffle=False)
     bert_dataset=datasets.DatasetDict({"train":bert_dataset["train"], "validation": bert_dataset["test"]})

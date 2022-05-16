@@ -2,7 +2,6 @@ tqdm
 datasets
 transformers
 sentencepiece
-accelerate
 tokenizers
 scipy
 sklearn

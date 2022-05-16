@@ -2,10 +2,10 @@ import os
 import subprocess
 
 def main():
-    model_dir="./models/BERT_10_05_2022_09:23:52/"
+    model_dir="./models/sample_BERT_16_05_2022_10:49:59/"
     log_dir=model_dir
     for i in range(1):
-        model_name_or_path=model_dir+"model_checkpoint_{}/".format(8)
+        model_name_or_path=model_dir#+"step_{}/".format(100)
         tasks=["cola", "mrpc", "rte", "stsb", "wnli"] #can also add "mnli", "qnli", "qqp", "sst2" 
         glue_log_dir=model_name_or_path+"glue/"
         os.makedirs(glue_log_dir, exist_ok=True)

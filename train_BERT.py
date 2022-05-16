@@ -5,12 +5,12 @@ from datetime import datetime
 def main():
     now=datetime.now()
     timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
-    log_dir="./logs/regular_bert_logs_"+timestamp+"/"
-    model_dir="./models/regular_bert_"+timestamp +"/"
+    log_dir="./logs/bert_logs_"+timestamp+"/"
+    model_dir="./models/bert_"+timestamp +"/"
     os.makedirs(log_dir)
     #os.makedirs(model_dir)
     l=[
-        "accelerate", "launch", "run_language_modeling.py",
+        "accelerate", "launch", "run_lm_with_subsets.py",
         "--preprocessed",
         "--log_dir", log_dir,
         "--load_data_from_disk",
@@ -22,7 +22,7 @@ def main():
         "--per_device_eval_batch_size", "128",
         "--learning_rate", "1e-4",
         "--weight_decay" ,"0.01",
-        "--max_train_steps", "1000000",
+        "--max_train_steps", "50000",
         "--gradient_accumulation_steps", "1",
         "--num_warmup_steps", "0",
         "--output_dir", model_dir,
@@ -31,12 +31,13 @@ def main():
         "--mlm_probability" ,"0.15",
         "--short_seq_prob", "0.1",
         "--nsp_probability", "0.5",
-        # "--select_every", "25000",
-        # "--partition_strategy", "random",
-        # "--num_partitions", "5000",
-        # "--selection_strategy", "fl",
-        # "--parallel_processes", "96",
-        "--save_every", "100000",
+        "--subset_fraction", "0.05",
+        "--select_every", "5000",
+        "--partition_strategy", "random",
+        "--num_partitions", "5000",
+        "--selection_strategy", "fl",
+        "--parallel_processes", "96",
+        "--save_every", "5000",
     ]
     subprocess.run(l)
     models=os.listdir(model_dir)
