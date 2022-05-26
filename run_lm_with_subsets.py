@@ -569,6 +569,9 @@ def main():
     if accelerator.is_main_process:
         num_samples = int(round(len(train_dataset) * args.subset_fraction, 0)) 
         init_subset_indices = [random.sample(list(range(len(train_dataset))), num_samples)]
+        output_file=f"init_subset_indices.pt"
+        output_file=os.path.join(args.subset_dir, output_file)
+        torch.save(torch.tensor(init_subset_indices[0]), output_file)
     else:
         init_subset_indices = [[]]
     accelerator.wait_for_everyone()

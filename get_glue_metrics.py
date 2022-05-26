@@ -2,12 +2,12 @@ import os
 import subprocess
 
 def main():
-    model_dir="./models/sample_BERT_16_05_2022_10:49:59/"
+    model_dir="./models/random_25percent_bert_25_05_2022_06:08:15/"
     log_dir=model_dir
     for i in range(1):
         model_name_or_path=model_dir#+"step_{}/".format(100)
-        tasks=["cola", "mrpc", "rte", "stsb", "wnli"] #can also add "mnli", "qnli", "qqp", "sst2" 
-        glue_log_dir=model_name_or_path+"glue/"
+        tasks=["cola", "mrpc", "rte", "stsb", "sst2", "qnli", "mnli", "qqp"] #can also add "mnli", "qnli", "qqp", "sst2" 
+        glue_log_dir=model_name_or_path+"glue_run2/"
         os.makedirs(glue_log_dir, exist_ok=True)
         for task in tasks:
             l=[
