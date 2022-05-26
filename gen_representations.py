@@ -20,19 +20,25 @@ def main():
     model, dataloader=accelerator.prepare(model, dataloader)
 
     model.eval()
-    all_outputs=[]
+    representations=[]
     progressbar=tqdm(range(len(dataloader)), disable=not accelerator.is_local_main_process)
     for step, batch in enumerate(dataloader):
         with torch.no_grad():
-            outputs=model(**batch)
-        #hidden_states=torch.moveaxis(torch.stack(outputs.hidden_states),1,0)
-        embeddings=outputs.last_hidden_state
+            outputs=model(**batch, output_hidden_states=True)
+        embeddings=outputs["hidden_states"][1]
         mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
+        mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
+        mask=mask*mask1
         mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
-        all_outputs.append(accelerator.gather(mean_pooled).to("cpu"))
+        mean_pooled=accelerator.gather(mean_pooled)
+        if accelerator.is_main_process:
+            mean_pooled=mean_pooled.cpu()
+            representations.append(mean_pooled)
         progressbar.update(1)
-
-    accelerator.save(torch.cat(all_outputs), "./bert_dataset_representations.pt")
+    
+    if accelerator.is_main_process:
+        representations=torch.cat(representations, dim=0)
+        torch.save(representations, "./bert_representations_layer_1.pt")
 
 if __name__=="__main__":
     main()

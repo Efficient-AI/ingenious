@@ -107,7 +107,7 @@ def partition_subset_selection(partition_train_rep, partition_query_rep, partiti
         obj = submodlib.GraphCutFunction(n = partition_train_rep.shape[0],
                                         mode = 'dense',
                                         lambdaVal = 1,
-                                        seperate_rep=False,
+                                        separate_rep=False,
                                         ggsijs = data_sijs)
     
     if smi_func_type == 'flcg':

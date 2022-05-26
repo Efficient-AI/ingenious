@@ -2,6 +2,8 @@ __pycache__
 /wikitext-2-raw-v1/.*
 /wikitext-2-raw-v1
 /wikitext-103-raw-v1/
+/wikitext-103-prepared/
+/bert_sents/
 books_large_*
 bookcorpus.tar.bz2
 /bert_dataset
@@ -9,6 +11,8 @@ bookcorpus.tar.bz2
 /models/
 /subsets/
 /bert_dataset_prepared/
+/sample_bert_dataset_prepared/
 /old-logs/
 /submodlib/
 /ingenious-env/
+/bert_dataset_prepared_with_text/
