@@ -647,10 +647,9 @@ def main():
     model, optimizer, full_dataloader, subset_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, full_dataloader, subset_dataloader, eval_dataloader, lr_scheduler)
 
-    # We need to recalculate our total training steps as the size of the training dataloader may have changed.
+    # We need to recalculate our total number of epochs as the size of the training dataloader may have changed.
     num_update_steps_per_epoch=math.ceil(len(subset_dataloader)/args.gradient_accumulation_steps)
-    args.max_train_steps=args.num_train_epochs * num_update_steps_per_epoch
-
+    args.num_train_epochs=math.ceil(args.max_train_steps/num_update_steps_per_epoch)
     if args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
         subset_strategy = SMIStrategy(logger, args.selection_strategy,
                                     num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
