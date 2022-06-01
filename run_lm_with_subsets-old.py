@@ -1,4 +1,5 @@
 import argparse
+import json
 import datetime
 import time
 import logging
@@ -37,18 +38,18 @@ def parse_args():
         "--log_dir",
         type=str,
         required=True,
-        help="The directory to which training logs should be written"
+        help="The directory to which logs should be written"
     )
     parser.add_argument(
         "--subset_dir",
         type=str,
         required=True,
-        help="The directory to which information regarding selected subsets should be stored"
+        help="The directory to which subsets should be written"
     )
     parser.add_argument(
         "--preprocessed",
         action="store_true",
-        help="If passed, already preprocessed data needs to be given and training will start right away"
+        help="If passed, already preprocessed data needs to be given"
     )
     parser.add_argument(
         "--load_data_from_disk",
@@ -59,7 +60,7 @@ def parse_args():
         "--data_directory",
         type=str,
         default=None,
-        help="The path to the directory containing the dataset"
+        help="The path to the directory in which dataset is present in the disk."
     )
     parser.add_argument(
         "--dataset_name",
@@ -111,8 +112,8 @@ def parse_args():
     parser.add_argument(
         "--vocab_size",
         type=int,
-        default=30522,
-        help="The size of vocabulary used by the tokenizer"
+        default=25000,
+        help="The size of vocabulary in tokenizer"
     )
     parser.add_argument(
         "--use_slow_tokenizer",
@@ -134,14 +135,15 @@ def parse_args():
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=1e-4,
+        default=5e-5,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
-    parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay to use.")
+    parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use.")
+    parser.add_argument("--num_train_epochs", type=int, default=3, help="Total number of training epochs to perform.")
     parser.add_argument(
         "--max_train_steps",
         type=int,
-        default=250000,
+        default=None,
         help="Total number of training steps to perform. If provided, overrides num_train_epochs.",
     )
     parser.add_argument(
@@ -158,14 +160,14 @@ def parse_args():
         choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
     )
     parser.add_argument(
-        "--num_warmup_steps", type=int, default=10000, help="Number of steps for the warmup in the lr scheduler."
+        "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler."
     )
     parser.add_argument("--output_dir", type=str, default=None, help="Where to store the final model.")
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(
         "--max_seq_length",
         type=int,
-        default=128,
+        default=None,
         help="The maximum total input sequence length after tokenization. Sequences longer than this will be truncated.",
     )
     parser.add_argument(
@@ -205,13 +207,13 @@ def parse_args():
         "--selection_strategy", type=str, default='fl', help="Subset selection strategy"
     )
     parser.add_argument(
-        "--select_every", type=int, default=25000, help="Select a new subset for training every select_every training steps"
+        "--select_every", type=int, default=50000, help="Select a new subset for training every select_every training steps"
     )
     parser.add_argument(
         "--partition_strategy", type=str, default="random", help="Partition strategy for subset selection"
     )
     parser.add_argument(
-        "--layer_for_similarity_computation", type=int, default=9, help="The hidden layer to use while calculating the similarities in submodular functions"
+        "--layer_for_similarity_computation", type=int, default=8, help="The hidden layer to use while calculating the similarities in submodular functions"
     )
     parser.add_argument(
         "--num_partitions", type=int, default=5000, help="Number of partitions in subset selection"
@@ -220,13 +222,15 @@ def parse_args():
         "--parallel_processes", type=int, default=96, help="Number of parallel processes for subset selection"
     )
     parser.add_argument(
-        "--num_warmstart_epochs", type=int, default=0, help="Number of epochs to run in the warmstart stage"
+        "--initial_random_subset", 
+        action="store_true",
+        help="If passed, already preprocessed data needs to be given"
     )
     parser.add_argument(
         "--checkpointing_steps",
         type=str,
         default=None,
-        help="Whether various states should be saved at the end of every n steps",
+        help="Whether various states should be saved at the end of every n steps or 'epoch' for each epoch.",
     )
     parser.add_argument(
         "--resume_from_checkpoint",
@@ -234,14 +238,22 @@ def parse_args():
         default=None,
         help="If the training should continue from a checkpoint folder",
     )
+    parser.add_argument(
+        "--with_tracking",
+        action="store_true",
+        help="Whether to load in all available experiment trackers from the environment and use them for logging",
+    )
     args=parser.parse_args()
+
     return args
+
 
 def main():
     args=parse_args()
     torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=75000))
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
-    accelerator=Accelerator()
+    # If we're using tracking, we also need to initialize it here and it will pick up all supported trackers in the environment
+    accelerator=Accelerator(log_with="all", logging_dir=args.log_dir) if args.with_tracking else Accelerator()
     # Make one log on every process with the configuration for debugging
     logging.basicConfig(
         filename=args.log_dir+"/train_logs.log",
@@ -560,12 +572,14 @@ def main():
 
     #Initial Random Subset Selection 
     if accelerator.is_main_process:
-        num_samples = int(round(len(train_dataset) * args.subset_fraction, 0))
+        num_samples = int(round(len(train_dataset) * args.subset_fraction, 0)) 
         init_subset_indices = [random.sample(list(range(len(train_dataset))), num_samples)]
     else:
         init_subset_indices = [[]]
     accelerator.wait_for_everyone()
     broadcast_object_list(init_subset_indices)
+    #accelerator.wait_for_everyone()
+    #print("Last element for ", accelerator.process_index, " is ", init_subset_indices[0][-1])
     full_dataset=train_dataset
     subset_dataset = full_dataset.select(init_subset_indices[0])
 
@@ -581,10 +595,6 @@ def main():
     data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm_probability=args.mlm_probability)
 
     # Dataloaders creation
-    warmstart_dataloader=DataLoader(
-        train_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
-    )
-
     full_dataloader=DataLoader(
         train_dataset, shuffle=False, collate_fn=data_collator, batch_size=args.per_device_eval_batch_size
     )
@@ -617,6 +627,16 @@ def main():
     if accelerator.distributed_type==DistributedType.TPU:
         model.tie_weights()
 
+    # Note -> the training dataloader needs to be prepared before we grab his length below (because its length will be 
+    # shorter in multiprocess)
+
+    # Scheduler and math around the number of training steps
+    num_update_steps_per_epoch=math.ceil(len(subset_dataloader)/args.gradient_accumulation_steps)
+    if args.max_train_steps is None:
+        args.max_train_steps=args.num_train_epochs * num_update_steps_per_epoch
+    else:
+        args.num_train_epochs=math.ceil(args.max_train_steps/num_update_steps_per_epoch)
+
     lr_scheduler=get_scheduler(
         name=args.lr_scheduler_type,
         optimizer=optimizer,
@@ -624,11 +644,14 @@ def main():
         num_training_steps=args.max_train_steps,
     )
 
-    logger.info(f"Prepare model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader, lr_scheduler with accelerate.")
-    # Prepare everything with our `accelerator`
-    model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
-        model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader, lr_scheduler)
+    logger.info(f"Prepare model, optimizer, full_dataloader, subset_dataloader, eval_dataloader, lr_scheduler with accelerate.")
+    # Prepare everything with out `accelerator`
+    model, optimizer, full_dataloader, subset_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
+        model, optimizer, full_dataloader, subset_dataloader, eval_dataloader, lr_scheduler)
 
+    # We need to recalculate our total number of epochs as the size of the training dataloader may have changed.
+    num_update_steps_per_epoch=math.ceil(len(subset_dataloader)/args.gradient_accumulation_steps)
+    args.num_train_epochs=math.ceil(args.max_train_steps/num_update_steps_per_epoch)
     if args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
         subset_strategy = SMIStrategy(logger, args.selection_strategy,
                                     num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
@@ -643,13 +666,20 @@ def main():
             checkpointing_steps=int(args.checkpointing_steps)
     else:
         checkpointing_steps=None
+
+    # We need to initialize the trackers we use and also store our configuration
+    if args.with_tracking:
+        experiment_config=vars(args)
+        # TensorBoard cannot log Enums, need the raw value
+        experiment_config["lr_scheduler_type"]=experiment_config["lr_scheduler_type"].value
+        accelerator.init_trackers("run_lm_with_subsets", experiment_config)
     
     # Train!
     total_batch_size=args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
-    logger.info(f"  Num warm-start epochs = {args.num_warmstart_epochs}")
+    logger.info(f"  Num Epochs = {args.num_train_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
@@ -657,63 +687,35 @@ def main():
     # Only show the progress bar once on each machine.
     progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
+    starting_epoch=0
+    # logger.info(f"Creating directories for various checkpoints.")
+    # if accelerator.is_main_process:
+    #     for i in range(args.max_train_steps//args.save_every):
+    #         os.makedirs(args.output_dir+"/model_checkpoint_{}".format(1+i))
+    # accelerator.wait_for_everyone()
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
-        accelerator.print(f"Resumed from checkpoint: {args.resume_from_checkpoint}")
-        accelerator.load_state(args.resume_from_checkpoint)
+        if args.resume_from_checkpoint is not None or args.resume_from_checkpoint != "":
+            accelerator.print(f"Resumed from checkpoint: {args.resume_from_checkpoint}")
+            accelerator.load_state(args.resume_from_checkpoint)
+            path = os.path.basename(args.resume_from_checkpoint)
+        else:
+            # Get the most recent checkpoint
+            dirs = [f.name for f in os.scandir(os.getcwd()) if f.is_dir()]
+            dirs.sort(key=os.path.getctime)
+            path = dirs[-1]  # Sorts folders by date modified, most recent checkpoint is the last
+        # Extract `epoch_{i}` or `step_{i}`
+        training_difference = os.path.splitext(path)[0]
 
-    logger.info(f"Begin the training.")
-    timing = []
-    for epoch in range(args.num_warmstart_epochs):
-        if epoch==0:
-            logger.info("Begin the warm-start")
-        model.train()
-        for step, batch in enumerate(warmstart_dataloader):
-            start_time=time.time()
-            outputs=model(**batch)
-            loss=outputs.loss
-            if (1+completed_steps)%10==0:
-                logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}")
-            loss=loss/args.gradient_accumulation_steps
-            accelerator.backward(loss)
-            if step%args.gradient_accumulation_steps==0 or step==len(warmstart_dataloader)-1:
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad()
-                progress_bar.update(1)
-                completed_steps+=1
-            if isinstance(checkpointing_steps, int):
-                if completed_steps%checkpointing_steps==0:
-                    output_dir=f"step_{completed_steps }"
-                    if args.output_dir is not None:
-                        output_dir=os.path.join(args.output_dir, output_dir)
-                    accelerator.save_state(output_dir)
-            if completed_steps>=args.max_train_steps:
-                break
-            timing.append([(time.time() - start_time), 0])
-        
-        model.eval()
-        losses=[]
-        for step, batch in enumerate(eval_dataloader):
-            with torch.no_grad():
-                outputs=model(**batch)
-
-            loss=outputs.loss
-            losses.append(accelerator.gather(loss.repeat(args.per_device_eval_batch_size)))
-
-        losses=torch.cat(losses)
-        losses=losses[:len(eval_dataset)]
-        try:
-            perplexity=math.exp(torch.mean(losses))
-        except OverflowError:
-            perplexity=float("inf")
-
-        logger.info(f"Steps {completed_steps}: perplexity: {perplexity}")
-        if epoch==args.num_warmstart_epochs-1:
-            logger.info("End the warm-start")
-
-    if (args.num_warmup_epochs!=0) or (args.resume_from_checkpoint):
-        start_time = time.time()
+        if "epoch" in training_difference:
+            starting_epoch = int(training_difference.replace("epoch_", "")) + 1
+            resume_step = None
+        else:
+            resume_step = int(training_difference.replace("step_", ""))
+            starting_epoch = resume_step // len(subset_dataloader)
+            resume_step -= starting_epoch * len(subset_dataloader)
+    
+    if not args.initial_random_subset:
         pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
         model.eval()
         representations = []
@@ -743,18 +745,21 @@ def main():
             total_storage += sys.getsizeof(representations.storage())
             representations = representations.numpy()
             logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
+            # batch_indices=torch.cat(batch_indices)
+            # batch_indices = batch_indices[:len(full_dataset)]
+            # batch_indices = batch_indices.cpu().tolist()
             batch_indices=list(range(len(full_dataset)))
             logger.info('Length of indices: {}'.format(len(batch_indices)))
             logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
         if accelerator.is_main_process:
+            # subset_strategy.update_representations(representations, None, batch_indices)
             init_subset_indices = [subset_strategy.select(num_samples, batch_indices, representations, parallel_processes=args.parallel_processes)]
         else:
             init_subset_indices = [[]]
         accelerator.wait_for_everyone()
         broadcast_object_list(init_subset_indices)
-        timing.append([0, (time.time() - start_time)])
     if accelerator.is_main_process:
-        output_file=f"subset_indices_after_step_{completed_steps}.pt"
+        output_file=f"subset_indices_after_step_0.pt"
         output_file=os.path.join(args.subset_dir, output_file)
         torch.save(torch.tensor(init_subset_indices[0]), output_file)
     accelerator.wait_for_everyone()
@@ -762,16 +767,27 @@ def main():
     subset_dataloader=DataLoader(
         subset_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size)
     subset_dataloader = accelerator.prepare(subset_dataloader)
-    
-    logger.info("Begin training along with subset selection")
-    while completed_steps<args.max_train_steps:
+
+    logger.info(f"Begin the training.")
+    timing = []
+    for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
+        if args.with_tracking:
+            total_loss=0
         for step, batch in enumerate(subset_dataloader):
+            # We need to skip steps until we reach the resumed step
+            if args.resume_from_checkpoint and epoch==starting_epoch:
+                if resume_step is not None and step<resume_step:
+                    completed_steps+=1
+                    continue
             train_time = 0
             subset_time = 0
             start_time = time.time()
             outputs=model(**batch)
             loss=outputs.loss
+            # We keep track of the loss at each epoch
+            if args.with_tracking:
+                total_loss+=loss.detach().float()
             if (1+completed_steps)%10==0:
                 logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}")
             loss=loss/args.gradient_accumulation_steps
@@ -793,6 +809,20 @@ def main():
 
             if completed_steps>=args.max_train_steps:
                 break
+
+            # if (1+completed_steps)%args.save_every==0:
+            #     if args.output_dir is not None:
+            #         try:
+            #             logger.info(f"saving model after #{completed_steps+1} steps")
+            #             accelerator.wait_for_everyone()
+            #             unwrapped_model=accelerator.unwrap_model(model)
+            #             dir_path=args.output_dir+"model_checkpoint_{}".format((1+completed_steps)//args.save_every)
+            #             unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process,  save_function=accelerator.save)
+            #             accelerator.save_state(dir_path)
+            #             if accelerator.is_main_process:
+            #                 tokenizer.save_pretrained(dir_path)
+            #         except:
+            #             pass
 
             if (completed_steps)%args.select_every==0:
                 accelerator.wait_for_everyone()
@@ -834,11 +864,15 @@ def main():
                         total_storage += sys.getsizeof(representations.storage())
                         representations = representations.numpy()
                         logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
+                        # batch_indices=torch.cat(batch_indices)
+                        # batch_indices = batch_indices[:len(full_dataset)]
+                        # batch_indices = batch_indices.cpu().tolist()
                         batch_indices=list(range(len(full_dataset)))
                         logger.info('Length of indices: {}'.format(len(batch_indices)))
                         logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
                     
                     if accelerator.is_main_process:
+                        # subset_strategy.update_representations(representations, None, batch_indices)
                         init_subset_indices = [subset_strategy.select(num_samples, batch_indices, representations, parallel_processes=args.parallel_processes)]
                     else:
                         init_subset_indices = [[]]
@@ -859,6 +893,9 @@ def main():
                 subset_dataloader = accelerator.prepare(subset_dataloader)
                 subset_time = (time.time() - start_time)
                 timing.append([train_time, subset_time])
+                # nsp=subset_dataset.filter(lambda example: example["next_sentence_label"]==1, num_proc=args.preprocessing_num_workers, desc="finding nsp 1")
+                # logger.info("Subset selection Finished. Subset size is {}".format(len(subset_dataset)))
+                # logger.info("NSP label distribution of the selected subset is 1:{}, 0:{}".format(len(nsp)/len(subset_dataset), (len(subset_dataset)-len(nsp))/len(subset_dataset)))
                 break
             timing.append([train_time, subset_time])
 
@@ -879,9 +916,31 @@ def main():
             perplexity=float("inf")
 
         logger.info(f"Steps {completed_steps}: perplexity: {perplexity}")
+
+        if args.with_tracking:
+            accelerator.log(
+                {"perplexity":perplexity, "train_loss":total_loss, "epoch": epoch, "step":completed_steps},
+            )
+        
+        if args.checkpointing_steps=="epoch":
+            output_dir=f"epoch_{epoch}"
+            if args.output_dir is not None:
+                output_dir=os.path.join(args.output_dir, output_dir)
+                accelerator.save_state(output_dir)
         
     logger.info(f"Timing: {timing}")
     logger.info(f"Saving the final model after {completed_steps} steps.")
+    # if args.output_dir is not None:
+    #     try:
+    #         accelerator.wait_for_everyone()
+    #         unwrapped_model=accelerator.unwrap_model(model)
+    #         dir_path=args.output_dir+"model_checkpoint_{}".format(args.max_train_steps//args.save_every)
+    #         accelerator.save_state(dir_path)
+    #         unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process, save_function=accelerator.save)
+    #         if accelerator.is_main_process:
+    #             tokenizer.save_pretrained(dir_path)
+    #     except:
+    #         pass
     if args.output_dir is not None:
         accelerator.wait_for_everyone()
         unwrapped_model=accelerator.unwrap_model(model)
@@ -890,6 +949,11 @@ def main():
         )
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
+        
+        with open(os.path.join(args.output_dir, "all_results.json"), "w") as f:
+            json.dump({"perplexity":perplexity}, f)
+
+
 
 if __name__=="__main__":
     main()
