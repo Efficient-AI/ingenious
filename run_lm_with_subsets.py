@@ -712,7 +712,7 @@ def main():
         if epoch==args.num_warmstart_epochs-1:
             logger.info("End the warm-start")
 
-    if (args.num_warmup_epochs!=0) or (args.resume_from_checkpoint):
+    if (args.num_warmstart_epochs!=0) or (args.resume_from_checkpoint):
         start_time = time.time()
         pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
         model.eval()
