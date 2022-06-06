@@ -1,7 +1,5 @@
 import argparse
-import json
 import datetime
-import time
 import logging
 import math
 import os
@@ -12,7 +10,6 @@ from torch.optim import AdamW
 from datasets import load_dataset, load_from_disk
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-
 import transformers
 from accelerate import Accelerator, DistributedType
 from accelerate.logging import get_logger
@@ -127,15 +124,14 @@ def parse_args():
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=5e-5,
+        default=1e-4,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
-    parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use.")
-    parser.add_argument("--num_train_epochs", type=int, default=3, help="Total number of training epochs to perform.")
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay to use.")
     parser.add_argument(
         "--max_train_steps",
         type=int,
-        default=None,
+        default=1000000,
         help="Total number of training steps to perform. If provided, overrides num_train_epochs.",
     )
     parser.add_argument(
@@ -159,7 +155,7 @@ def parse_args():
     parser.add_argument(
         "--max_seq_length",
         type=int,
-        default=None,
+        default=128,
         help="The maximum total input sequence length after tokenization. Sequences longer than this will be truncated.",
     )
     parser.add_argument(
@@ -171,13 +167,13 @@ def parse_args():
     parser.add_argument(
         "--preprocessing_num_workers",
         type=int,
-        default=None,
+        default=96,
         help="The number of processes to use for the preprocessing.",
     )
     parser.add_argument(
         "--preprocess_batch_size",
         type=int,
-        default=None,
+        default=2000,
         help="batch size during preprocessing"
     )
     parser.add_argument(
@@ -195,7 +191,7 @@ def parse_args():
     parser.add_argument(
         "--checkpointing_steps",
         type=str,
-        default=None,
+        default=50000,
         help="Whether various states should be saved at the end of every n steps, or 'epoch' for each epoch.",
     )
     parser.add_argument(
@@ -203,11 +199,6 @@ def parse_args():
         type=str,
         default=None,
         help="If the training should continue from a checkpoint folder",
-    )
-    parser.add_argument(
-        "--with_tracking",
-        action="store_true",
-        help="Whether to load in all available experiment trackers from the environment and use them for logging.",
     )
     args=parser.parse_args()
 
@@ -219,7 +210,7 @@ def main():
     torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=25000))
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will pick up all supported trackers in the environment
-    accelerator=Accelerator(log_with="all", logging_dir=args.log_dir) if args.with_tracking else Accelerator()
+    accelerator=Accelerator()
     # Make one log on every process with the configuration for debugging
     logging.basicConfig(
         filename=args.log_dir+"/train_logs.log",
@@ -577,13 +568,6 @@ def main():
     # Note -> the training dataloader needs to be prepared before we grab his length below (because its length will be 
     # shorter in multiprocess)
 
-    # Scheduler and math around the number of training steps
-    num_update_steps_per_epoch=math.ceil(len(train_dataloader)/args.gradient_accumulation_steps)
-    if args.max_train_steps is None:
-        args.max_train_steps=args.num_train_epochs * num_update_steps_per_epoch
-    else:
-        args.num_train_epochs=math.ceil(args.max_train_steps/num_update_steps_per_epoch)
-
     lr_scheduler=get_scheduler(
         name=args.lr_scheduler_type,
         optimizer=optimizer,
@@ -597,10 +581,6 @@ def main():
         model, optimizer, train_dataloader, eval_dataloader, lr_scheduler
     )
 
-    # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
-    args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
-
     # Figure out how many steps we should save the Accelerator states
     if hasattr(args.checkpointing_steps, "isdigit"):
         checkpointing_steps=args.checkpointing_steps
@@ -609,19 +589,11 @@ def main():
     else:
         checkpointing_steps=None
 
-    # We need to initialize the trackers we use and also store our configuration
-    if args.with_tracking:
-        experiment_config=vars(args)
-        # TensorBoard cannot log Enums, need the raw value
-        experiment_config["lr_scheduler_type"]=experiment_config["lr_scheduler_type"].value
-        accelerator.init_trackers("run_language_modeling", experiment_config)
-
     # Train!
     total_batch_size=args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
-    logger.info(f"  Num Epochs = {args.num_train_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
@@ -629,52 +601,17 @@ def main():
     # Only show the progress bar once on each machine.
     progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
-    starting_epoch=0
-
-    # logger.info(f"Creating directories for various checkpoints.")
-    # if accelerator.is_main_process:
-    #     for i in range(args.max_train_steps//args.save_every):
-    #         os.makedirs(args.output_dir+"/model_checkpoint_{}".format(1+i))
-    # accelerator.wait_for_everyone()
-
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
-        if args.resume_from_checkpoint is not None or args.resume_from_checkpoint != "":
-            accelerator.print(f"Resumed from checkpoint: {args.resume_from_checkpoint}")
-            accelerator.load_state(args.resume_from_checkpoint)
-            path = os.path.basename(args.resume_from_checkpoint)
-        else:
-            # Get the most recent checkpoint
-            dirs = [f.name for f in os.scandir(os.getcwd()) if f.is_dir()]
-            dirs.sort(key=os.path.getctime)
-            path = dirs[-1]  # Sorts folders by date modified, most recent checkpoint is the last
-        # Extract `epoch_{i}` or `step_{i}`
-        training_difference = os.path.splitext(path)[0]
-
-        if "epoch" in training_difference:
-            starting_epoch = int(training_difference.replace("epoch_", "")) + 1
-            resume_step = None
-        else:
-            resume_step = int(training_difference.replace("step_", ""))
-            starting_epoch = resume_step // len(train_dataloader)
-            resume_step -= starting_epoch * len(train_dataloader)
+        accelerator.print(f"Resumed from checkpoint: {args.resume_from_checkpoint}")
+        accelerator.load_state(args.resume_from_checkpoint)
 
     logger.info(f"Begin the training.")
-    for epoch in range(starting_epoch, args.num_train_epochs):
+    while completed_steps<args.max_train_steps:
         model.train()
-        if args.with_tracking:
-            total_loss=0
         for step, batch in enumerate(train_dataloader):
-            # We need to skip steps until we reach the resumed step
-            if args.resume_from_checkpoint and epoch==starting_epoch:
-                if resume_step is not None and step<resume_step:
-                    completed_steps+=1
-                    continue
             outputs=model(**batch)
             loss=outputs.loss
-            # We keep track of the loss at each epoch
-            if args.with_tracking:
-                total_loss+=loss.detach().float()
             if (1+completed_steps)%10==0:
                 logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}")
             loss=loss/args.gradient_accumulation_steps
@@ -695,23 +632,6 @@ def main():
             
             if completed_steps>=args.max_train_steps:
                 break
-                
-            # if completed_steps%100==0:
-            #     logger.info(f"Done with {completed_steps} steps and currently in epoch #{epoch+1}.")
-            
-            # if (1+completed_steps)%args.save_every==0:
-            #     if args.output_dir is not None:
-            #         try:
-            #             logger.info(f"saving the model after #{1+completed_steps} steps")
-            #             accelerator.wait_for_everyone()
-            #             unwrapped_model=accelerator.unwrap_model(model)
-            #             dir_path=args.output_dir+"model_checkpoint_{}".format((1+completed_steps)//args.save_every)
-            #             unwrapped_model.save_pretrained(dir_path, is_main_process=accelerator.is_main_process, save_function=accelerator.save)
-            #             accelerator.save_state(dir_path)
-            #             if accelerator.is_main_process:
-            #                 tokenizer.save_pretrained(dir_path)
-            #         except:
-            #             pass
 
         model.eval()
         losses=[]
@@ -730,39 +650,8 @@ def main():
             perplexity=float("inf")
         
         logger.info(f"Steps {completed_steps}: perplexity: {perplexity}")
-        
-        if args.with_tracking:
-            accelerator.log(
-                {"perplexity":perplexity, "train_loss": total_loss, "epoch":epoch, "step":completed_steps},
-            )
-        # if epoch<args.num_train_epochs-1:
-        #     if args.output_dir is not None:
-        #         logger.info(f"saving model after epoch #{epoch+1}")
-        #         accelerator.wait_for_everyone()
-        #         unwrapped_model=accelerator.unwrap_model(model)
-        #         dir_path=args.output_dir+"/model_checkpoint_epoch_{}".format(epoch+1)
-        #         if accelerator.is_main_process:
-        #             os.makedirs(dir_path, exist_ok=True)
-        #         unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
-        #         if accelerator.is_main_process:
-        #             tokenizer.save_pretrained(dir_path)
-        if args.checkpointing_steps=="epoch":
-            output_dir=f"epoch_{epoch}"
-            if args.output_dir is not None:
-                output_dir=os.path.join(args.output_dir, output_dir)
-                accelerator.save_state(output_dir)
+
     logger.info(f"Saving the final model after {completed_steps} steps.")
-    # if args.output_dir is not None:
-    #     try:
-    #         accelerator.wait_for_everyone()
-    #         unwrapped_model=accelerator.unwrap_model(model)
-    #         dir_path=args.output_dir+"model_checkpoint_{}".format(args.max_train_steps//args.save_every)
-    #         unwrapped_model.save_pretrained(dir_path, save_function=accelerator.save)
-    #         accelerator.save_state(dir_path)
-    #         if accelerator.is_main_process:
-    #             tokenizer.save_pretrained(dir_path)
-    #     except:
-    #         pass
     if args.output_dir is not None:
         accelerator.wait_for_everyone()
         unwrapped_model=accelerator.unwrap_model(model)
@@ -771,9 +660,6 @@ def main():
         )
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
-
-        with open(os.path.join(args.output_dir, "all_results.json"), "w") as f:
-            json.dump({"perplexity":perplexity}, f)
 
 if __name__=="__main__":
     main()
