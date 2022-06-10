@@ -670,8 +670,8 @@ def main():
             start_time=time.time()
             outputs=model(**batch)
             loss=outputs.loss
-            if (1+completed_steps)%10==0:
-                logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}")
+            # if (1+completed_steps)%10==0:
+            logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}; lr: {lr_scheduler.get_last_lr()};")
             loss=loss/args.gradient_accumulation_steps
             accelerator.backward(loss)
             if step%args.gradient_accumulation_steps==0 or step==len(warmstart_dataloader)-1:
