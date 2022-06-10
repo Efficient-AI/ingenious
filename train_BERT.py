@@ -14,7 +14,7 @@ def main():
         "accelerate", "launch", "run_language_modeling.py",
         "--preprocessed",
         "--log_dir", log_dir,
-        # "--subset_dir", subset_dir,
+        "--subset_dir", subset_dir,
         "--load_data_from_disk",
         "--data_directory", "./bert_dataset_prepared",
         "--tokenizer_name", "bert-base-uncased",
