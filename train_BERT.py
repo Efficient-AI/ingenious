@@ -5,9 +5,9 @@ from datetime import datetime
 def main():
     now=datetime.now()
     timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
-    log_dir="./logs/fl_25percent_layer9_warmstart_bert_logs_"+timestamp+"/"
-    model_dir="./models/fl_25percent_layer9_warmstart_bert"+timestamp +"/"
-    subset_dir="./subsets/fl_25percent_layer9_warmstart_bert_"+timestamp+"/"
+    log_dir="./logs/random_online_bert_logs_"+timestamp+"/"
+    model_dir="./models/random_online_bert_"+timestamp +"/"
+    subset_dir="./subsets/random_online_bert_"+timestamp+"/"
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(subset_dir, exist_ok=True)
     l=[
@@ -38,11 +38,15 @@ def main():
         "--partition_strategy", "random",
         "--layer_for_similarity_computation", "9",
         "--num_partitions", "5000",
-        "--selection_strategy", "fl",
+        "--selection_strategy", "Random-Online",
         "--parallel_processes", "96",
-        "--num_warmstart_epochs", "1",
+        "--num_warmstart_epochs", "0",
         "--checkpointing_steps", "25000",
     ]
+    with open(log_dir+"parameters.txt", "w") as f:
+        for item in l:
+            f.write(item)
+            f.write("\n")
     subprocess.run(l)
 
 if __name__=="__main__":

@@ -616,19 +616,17 @@ def main():
     # On TPU, the tie weights in our model have been disconnected, so we need to restore the ties.
     if accelerator.distributed_type==DistributedType.TPU:
         model.tie_weights()
-
     lr_scheduler=get_scheduler(
         name=args.lr_scheduler_type,
         optimizer=optimizer,
         num_warmup_steps=args.num_warmup_steps,
-        num_training_steps=args.max_train_steps,
+        num_training_steps=1000000,
     )
 
-    logger.info(f"Prepare model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader, lr_scheduler with accelerate.")
+    logger.info(f"Prepare model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader with accelerate.")
     # Prepare everything with our `accelerator`
-    model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
-        model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader, lr_scheduler)
-
+    model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader = accelerator.prepare(
+        model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader)
     if args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
         subset_strategy = SMIStrategy(logger, args.selection_strategy,
                                     num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
@@ -772,8 +770,7 @@ def main():
             start_time = time.time()
             outputs=model(**batch)
             loss=outputs.loss
-            if (1+completed_steps)%10==0:
-                logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}")
+            logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}; lr: {lr_scheduler.get_last_lr()};")
             loss=loss/args.gradient_accumulation_steps
             accelerator.backward(loss)
             if step%args.gradient_accumulation_steps==0 or step==len(subset_dataloader)-1:
@@ -782,6 +779,7 @@ def main():
                 optimizer.zero_grad()
                 progress_bar.update(1)
                 completed_steps+=1
+                # logger.info(f"Completed Steps: {completed_steps}; Current lr: {lr_scheduler.get_last_lr()};")
             train_time += (time.time() - start_time)
 
             if isinstance(checkpointing_steps, int):

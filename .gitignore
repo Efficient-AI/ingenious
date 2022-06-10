@@ -16,3 +16,5 @@ bookcorpus.tar.bz2
 /submodlib/
 /ingenious-env/
 /bert_dataset_prepared_with_text/
+/wikipedia_prepared/
+/bookscorpus_prepared/
