@@ -11,10 +11,10 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(subset_dir, exist_ok=True)
     l=[
-        "accelerate", "launch", "run_lm_with_subsets.py",
+        "accelerate", "launch", "run_language_modeling.py",
         "--preprocessed",
         "--log_dir", log_dir,
-        "--subset_dir", subset_dir,
+        # "--subset_dir", subset_dir,
         "--load_data_from_disk",
         "--data_directory", "./bert_dataset_prepared",
         "--tokenizer_name", "bert-base-uncased",
@@ -24,7 +24,7 @@ def main():
         "--per_device_eval_batch_size", "128",
         "--learning_rate", "1e-4",
         "--weight_decay" ,"0.01",
-        "--max_train_steps", "250000",
+        "--max_train_steps", "1000000",
         "--gradient_accumulation_steps", "1",
         "--num_warmup_steps", "10000",
         "--output_dir", model_dir,
