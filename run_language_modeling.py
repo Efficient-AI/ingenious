@@ -575,10 +575,10 @@ def main():
         num_training_steps=args.max_train_steps,
     )
 
-    logger.info("Prepare model, optimizer, train_dataloader, eval_dataloader, lr_scheduler with accelerate.")
+    logger.info("Prepare model, optimizer, train_dataloader, eval_dataloader with accelerate.")
     # Prepare everything with our `accelerator`
-    model, optimizer, train_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
-        model, optimizer, train_dataloader, eval_dataloader, lr_scheduler
+    model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
+        model, optimizer, train_dataloader, eval_dataloader
     )
 
     # Figure out how many steps we should save the Accelerator states
@@ -612,8 +612,8 @@ def main():
         for step, batch in enumerate(train_dataloader):
             outputs=model(**batch)
             loss=outputs.loss
-            if (1+completed_steps)%10==0:
-                logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}")
+            # if (1+completed_steps)%10==0:
+            logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}; lr: {lr_scheduler.get_last_lr()}")
             loss=loss/args.gradient_accumulation_steps
             accelerator.backward(loss)
             if step%args.gradient_accumulation_steps==0 or step==len(train_dataloader)-1:
