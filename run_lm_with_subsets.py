@@ -103,6 +103,18 @@ def parse_args():
         help="Pretrained config name or path if not the same as model_name",
     )
     parser.add_argument(
+        "--hidden_size", type=int, default=768, help="Hidden Size of language model",
+    )
+    parser.add_argument(
+        "--num_hidden_layers", type=int, default=12, help="Num Hidden Layers",
+    )
+    parser.add_argument(
+        "--num_attention_heads", type=int, default=12, help="Num attention heads",
+    )
+    parser.add_argument(
+        "--intermediate_size", type=int, default=3072, help="Intermediate size",
+    )
+    parser.add_argument(
         "--tokenizer_name",
         type=str,
         default=None,
@@ -308,10 +320,10 @@ def main():
     else:
         config=BertConfig(
             vocab_size=args.vocab_size,
-            hidden_size=768,
-            num_hidden_layers=12,
-            num_attention_heads=12,
-            intermediate_size=3072,
+            hidden_size=args.hidden_size,
+            num_hidden_layers=args.num_hidden_layers,
+            num_attention_heads=args.num_attention_heads,
+            intermediate_size=args.intermediate_size,
             hidden_act="gelu",
             hidden_dropout_prob=0.1,
             attention_probs_dropout_prob=0.1,
