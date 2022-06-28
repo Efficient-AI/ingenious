@@ -11,6 +11,7 @@ from .dataselectionstrategy import DataSelectionStrategy
 from torch.utils.data import Subset, DataLoader
 import submodlib
 from multiprocessing import Pool
+# from pathos.multiprocessing import ProcessingPool
 from itertools import starmap
 import tqdm
 #from p_tqdm import p_umap
@@ -256,10 +257,10 @@ class SMIStrategy():
             assert self.num_partitions == 1, "Partition strategy {} not implemented for {} partitions".format(self.partition_strategy, self.num_partitions)
 
         if self.smi_func_type in ['flcg', 'logdetcg', 'gccg']:
-            assert self.private_rep is not None, "CG functions requires private set"
+            assert private_representations is not None, "CG functions requires private set"
 
         if self.smi_func_type in ['fl1mi', 'fl2mi', 'logdetmi', 'gcmi']:
-            assert self.query_rep is not None, "SMI functions requires query set"
+            assert query_representations is not None, "SMI functions requires query set"
 
         greedyIdxs = []
         

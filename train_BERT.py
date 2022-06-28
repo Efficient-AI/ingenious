@@ -11,7 +11,7 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(subset_dir, exist_ok=True)
     l=[
-        "accelerate", "launch", "run_language_modeling.py",
+        "accelerate", "launch", "run_lm_with_subsets.py",
         "--preprocessed",
         "--log_dir", log_dir,
         "--subset_dir", subset_dir,
@@ -24,7 +24,7 @@ def main():
         "--per_device_eval_batch_size", "128",
         "--learning_rate", "1e-4",
         "--weight_decay" ,"0.01",
-        "--max_train_steps", "1000000",
+        "--max_train_steps", "150000",
         "--gradient_accumulation_steps", "1",
         "--num_warmup_steps", "10000",
         "--output_dir", model_dir,
@@ -33,15 +33,15 @@ def main():
         "--mlm_probability" ,"0.15",
         "--short_seq_prob", "0.1",
         "--nsp_probability", "0.5",
-        "--subset_fraction", "0.25",
-        "--select_every", "25000",
+        "--subset_fraction", "0.15",
+        "--select_every", "15000",
         "--partition_strategy", "random",
         "--layer_for_similarity_computation", "9",
         "--num_partitions", "5000",
         "--selection_strategy", "Random-Online",
         "--parallel_processes", "96",
         "--num_warmstart_epochs", "0",
-        "--checkpointing_steps", "25000",
+        "--checkpointing_steps", "15000",
     ]
     with open(log_dir+"parameters.txt", "w") as f:
         for item in l:

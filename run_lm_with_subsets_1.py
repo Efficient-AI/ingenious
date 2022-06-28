@@ -558,7 +558,8 @@ def main():
         train_dataset=dataset["train"]
         eval_dataset=dataset["validation"]
 
-    #Initial Random Subset Selection 
+    #Initial Random Subset Selection
+    subset_sent_freq=[0 for i in range(len(train_dataset))]
     if accelerator.is_main_process:
         num_samples = int(round(len(train_dataset) * args.subset_fraction, 0))
         init_subset_indices = [random.sample(list(range(len(train_dataset))), num_samples)]
@@ -566,6 +567,8 @@ def main():
         init_subset_indices = [[]]
     accelerator.wait_for_everyone()
     broadcast_object_list(init_subset_indices)
+    for idx in init_subset_indices[0]:
+        subset_sent_freq[idx]+=1
     full_dataset=train_dataset
     subset_dataset = full_dataset.select(init_subset_indices[0])
 
@@ -712,48 +715,64 @@ def main():
 
     if (args.num_warmstart_epochs!=0) or (args.resume_from_checkpoint):
         start_time = time.time()
-        if args.selection_strategy == 'Random-Online':
-            if accelerator.is_main_process:
-                init_subset_indices = [random.sample(list(range(len(full_dataset))), num_samples)]
-            else:
-                init_subset_indices = [[]]
-        elif args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
-            pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
-            model.eval()
-            representations = []
-            batch_indices = []
-            total_cnt = 0
-            total_storage = 0
+        pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
+        model.eval()
+        representations = []
+        batch_indices = []
+        total_cnt = 0
+        total_storage = 0
 
-            for step, batch in enumerate(full_dataloader):
-                with torch.no_grad():
-                    output=model(**batch, output_hidden_states=True)
-                embeddings=output['hidden_states'][args.layer_for_similarity_computation]
-                mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
-                mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
-                mask=mask*mask1
-                mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
-                mean_pooled = accelerator.gather(mean_pooled)
-                total_cnt += mean_pooled.size(0)
-                if accelerator.is_main_process:
-                    mean_pooled = mean_pooled.cpu()
-                    total_storage += sys.getsizeof(mean_pooled.storage())
-                    representations.append(mean_pooled)
-                pbar.update(1)
+        for step, batch in enumerate(full_dataloader):
+            with torch.no_grad():
+                output=model(**batch, output_hidden_states=True)
+            embeddings=output['hidden_states'][args.layer_for_similarity_computation]
+            mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
+            mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
+            mask=mask*mask1
+            mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
+            mean_pooled = accelerator.gather(mean_pooled)
+            total_cnt += mean_pooled.size(0)
             if accelerator.is_main_process:
-                # representations = torch.rand(41543424, 768)
-                representations=torch.cat(representations, dim = 0)
-                representations = representations[:len(full_dataset)]
-                total_storage += sys.getsizeof(representations.storage())
-                representations = representations.numpy()
-                logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
-                batch_indices=list(range(len(full_dataset)))
-                logger.info('Length of indices: {}'.format(len(batch_indices)))
-                logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
-            if accelerator.is_main_process:
-                init_subset_indices = [subset_strategy.select(num_samples, batch_indices, representations, parallel_processes=args.parallel_processes)]
-            else:
-                init_subset_indices = [[]]
+                mean_pooled = mean_pooled.cpu()
+                total_storage += sys.getsizeof(mean_pooled.storage())
+                representations.append(mean_pooled)
+            pbar.update(1)
+        if accelerator.is_main_process:
+            # representations = torch.rand(41543424, 768)
+            representations=torch.cat(representations, dim = 0)
+            representations = representations[:len(full_dataset)]
+            total_storage += sys.getsizeof(representations.storage())
+            representations = representations.numpy()
+            logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
+            batch_indices=list(range(len(full_dataset)))
+            logger.info('Length of indices: {}'.format(len(batch_indices)))
+            logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
+        if accelerator.is_main_process:
+            greedyList = [subset_strategy.select(0.80*len(full_dataset), batch_indices, representations, parallel_processes=args.parallel_processes)]
+            # greedyList=[list(range(int(0.80*len(full_dataset))))]
+            selected=[False]*len(greedyList[0])
+            init_subset_indices=[[]]
+            freq=sorted(list(set(subset_sent_freq)))
+            i=0
+            while len(init_subset_indices[0])<num_samples:
+                if i>=len(freq):
+                    init_subset_indices[0].extend(greedyList[0][:(num_samples-len(init_subset_indices[0]))])
+                    break
+                l=[]
+                pbar=tqdm(range(len(greedyList[0])))
+                for j, idx in enumerate(greedyList[0]):
+                    if subset_sent_freq[idx]==freq[i] and selected[idx]==False:
+                        l.append(j)
+                        init_subset_indices[0].append(idx)
+                        selected[idx]=True
+                    if len(init_subset_indices[0])>=num_samples:
+                        break
+                    pbar.update(1)
+                i+=1
+            for idx in init_subset_indices[0]:
+                subset_sent_freq[idx]+=1
+        else:
+            init_subset_indices = [[]]
         accelerator.wait_for_everyone()
         broadcast_object_list(init_subset_indices)
         timing.append([0, (time.time() - start_time)])
@@ -843,7 +862,27 @@ def main():
                         logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
                     
                     if accelerator.is_main_process:
-                        init_subset_indices = [subset_strategy.select(num_samples, batch_indices, representations, parallel_processes=args.parallel_processes)]
+                        greedyList = [subset_strategy.select(0.80*len(full_dataset), batch_indices, representations, parallel_processes=args.parallel_processes)]
+                        # greedyList=[list(range(int(0.80*len(full_dataset))))]
+                        selected=[False]*len(full_dataset)
+                        init_subset_indices=[[]]
+                        freq=sorted(list(set(subset_sent_freq)))
+                        i=0
+                        while len(init_subset_indices[0])<num_samples:
+                            if i>=len(freq):
+                                init_subset_indices[0].extend(greedyList[0][:(num_samples-len(init_subset_indices[0]))])
+                                break
+                            l=[]
+                            for j, idx in enumerate(greedyList[0]):
+                                if subset_sent_freq[idx]==freq[i] and selected[idx]==False:
+                                    l.append(j)
+                                    init_subset_indices[0].append(idx)
+                                    selected[idx]=True
+                                if len(init_subset_indices[0])>=num_samples:
+                                    break
+                            i+=1
+                        for idx in init_subset_indices[0]:
+                            subset_sent_freq[idx]+=1
                     else:
                         init_subset_indices = [[]]
 
