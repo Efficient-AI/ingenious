@@ -249,7 +249,7 @@ def parse_args():
     parser.add_argument("--knn_R", type=int, default=1, help="nb of replicas of the same dataset (the dataset will be copied across ngpu/R, default R=1)")
     parser.add_argument("--knn_max_add", type=int, default=-1, help="copy sharded dataset to CPU each max_add additions (to avoid memory overflows with geometric reallocations)")
     parser.add_argument("--knn_abs", type=int, default=32768, help="split adds in blocks of no more than N vectors")
-    parser.add_argument("--knn_qbs", type=int, default=32768, help="Split queries in blocks of no more than N vectors")
+    parser.add_argument("--knn_qbs", type=int, default=16384, help="Split queries in blocks of no more than N vectors")
     parser.add_argument("--knn_nprobe", type=int, default=128, help="try this number of probes")
     parser.add_argument("--knn_nnn", type=int, default=10, help="search N neighbors for each query")
     args=parser.parse_args()

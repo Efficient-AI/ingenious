@@ -49,11 +49,11 @@ def main():
         "--knn_index_key", "IVF65536,Flat",
         "--knn_ngpu", "8",
         "--knn_tempmem", "0",
-        "--knn_altadd", 
+        # "--knn_altadd", 
         "--knn_use_float16",
         "--knn_abs", "2097152",
         "--knn_nprobe", "64",
-        "--knn_nnn", "90"
+        "--knn_nnn", "82"
     ]
     with open(log_dir+"parameters.txt", "w") as f:
         for item in l:

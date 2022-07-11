@@ -41,24 +41,25 @@ class KnnSMIStrategy():
             replicas=replicas, max_add=max_add, add_batch_size=add_batch_size, 
             query_batch_size=query_batch_size, nprobe=nprobe, nnn=nnn,
         )
+        n=representations.shape[0]
         del representations
         self.logger.info(f"Kernel Computation Time: {time.time()-kernel_time}")
         greedy_selection_start_time=time.time()
         if self.smi_func_type=="fl":
-            obj=submodlib.FacilityLocationFunction(n=representations.shape[0],
+            obj=submodlib.FacilityLocationFunction(n=n,
                                                     separate_rep="False",
                                                     mode="sparse",
                                                     sijs=data_sijs,
                                                     num_neighbors=nnn)
         if self.smi_func_type=="gc":
-            obj=submodlib.GraphCutFunction(n=representations.shape[0],
+            obj=submodlib.GraphCutFunction(n=n,
                                             mode="sparse",
                                             lambdaVal=self.lambdaVal,
                                             separate_rep=False,
                                             ggsijs=data_sijs,
                                             num_neighbors=nnn)
         if self.smi_func_type=="logdet":
-            obj=submodlib.LogDeterminantFunction(n=representations.shape[0],
+            obj=submodlib.LogDeterminantFunction(n=n,
                                                     mode="sparse",
                                                     lambdaVal=self.lambdaVal,
                                                     sijs=data_sijs,
