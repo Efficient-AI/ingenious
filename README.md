@@ -1,12 +1,18 @@
 # LM-pretraining
 ## Efficient Pretraining of Language Models
 ### Environment Setup
-#### Run the following commands in a sequence
-- `conda create -n ingenious -c rapidsai -c nvidia -c conda-forge cuml=22.02 python=3.8 cudatoolkit=11.4`
-- `conda activate ingenious`
-- `pip3 install -r requirements.txt`
-- `pip3 install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ submodlib
-`
+#### Run the following in a sequence to set up the environment for running the code. (It is assumed that you have anaconda installed)
+>- `conda create --name ingenious python=3.9`
+>- `conda activate ingenious`
+>- `conda install pytorch torchvision torchaudio cudatoolkit=11.6 -c pytorch -c conda-forge`
+>- `pip3 install git+https://github.com/huggingface/accelerate`
+>- `pip3 install -r requirements.txt`
+>- `git clone https://github.com/Language-Modelling/submodlib.git`
+>- `cd submodlib`
+>- `pip3 install .`
+>- `conda install -c conda-forge faiss-gpu`
+>- `cd ..`
+>- `conda deactivate`
 #### Configuring the accelerate library according to the training environment
 Run `accelerate config` and answer the following questions
 An example is given below
@@ -17,36 +23,10 @@ An example is given below
 - How many processes in total will you use? [1]: **4**
 - Do you wish to use FP16 (mixed precision)? [yes/NO]: **yes**
 
-##### Change the required parameters in `train_sample.py` or `train_BERT.py` 
-### On a sample dataset
-- Run `python3 prepare_sample.py` (It downloads `wikitext-103-raw-v1`)
-- Run `python3 train_sample.py` trains tokenizer on data, and then trains BERT from scratch for 3 epochs)
-#### On the Bookcorpus + English Wikipedia dataset
-- Prepare the dataset by running `python3 prepare_bookcorpus_wiki.py`
-- Train BERT from scratch for 1,000,000 steps by running `python3 train_BERT.py`
+### Running the Code
+Change appropriate parameters in `train_BERT.py` and run it. 
 
-### Requirements
-
-Run `pip install -r requirements.txt` to install dependencies
-
-# [GLUE Benchmark](https://gluebenchmark.com/) 
-
-The General Language Understanding Evaluation(GLUE) benchmark is a collection of resources for training, evaluating, and analyzing natural language understanding systems. GLUE consists of:
-- A benchmark of nine sentence- or sentence-pair language understanding tasks built on established existing datasets and selected to cover a diverse range of dataset sizes, text genres, and degrees of difficulty,
-- A diagnostic dataset designed to evaluate and analyze model performance with respect to a wide range of linguistic phenomena found in natural language, and
-- A public leaderboard for tracking performance on the benchmark and a dashboard for visualizing the performance of models on the diagnostic set.
-
-## GLUE Tasks
-| Name | CODE| Metric | `bert-base-uncased`|
-|----------|---- |--------|-----|
-|The Corpus of Linguistic Acceptability|CoLA| Matthew's Corr|49.23|
-|The Stanford Sentiment Treebank|SST-2|Accuracy|91.97|
-|Microsoft Research Paraphrase Corpus|MRPC|F1/Accuracy|89.47/85.29|
-|Semantic Textual Similarity Benchmark|STS-B|Pearson-Spearman Corr|	83.95/83.70|
-|Quora Question Pairs|QQP|F1/Accuracy|88.40/84.31|
-|MultiNLI Matched|MNLI|Accuracy|80.61|
-|MultiNLI Mismatched|MNLI|Accuracy|81.08|
-|Question NLI|QNLI|Accuracy|87.46|
-|Recognizing Textual Entailment|RTE|Accuracy|61.73|
-|Winograd NLI|WNLI|Accuracy|45.07|
-|Diagnostics Main|diagnostic|Matthew's Corr|
+#### There are different scripts that execute different algorithms
+- `run_language_modeling.py` runs traditional BERT pretraining, exactly similar to the Google's BERT paper
+- `run_lm_with_subsets.py` runs the following algorithm: After every `select_every` steps, embeddings are computed for the full dataset, Using the submodular function mentioned as `selection_strategy`, a new subset is selected and this is used to train the model for next `select_every` steps. This process continues till `max_train_steps` training steps are completed
+- `run_lm_with_subsets_knn.py` runs the following algorithm: An initial warmstart is done on the ground set. Assuming that the embeddings computed are not that bad to compute similarities and hence to measure redundancies, we use the computed embeddings at this point to select a subset using the submodular function mentioned as `selection_strategy`. After every 

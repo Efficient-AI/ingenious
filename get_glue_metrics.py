@@ -2,7 +2,7 @@ import os
 import subprocess
 
 def main():
-    model_dir="models/random_online_bert_25_06_2022_20:27:54/"
+    model_dir="models/fl_bert_02_07_2022_10:41:35/"
     log_dir=model_dir
     for i in range(1):
         model_name_or_path=model_dir#+"step_{}/".format(100)
@@ -24,7 +24,7 @@ def main():
                 # "--seed", "23",
             ]
             subprocess.run(l)
-    model_dir="models/random_online_bert_25_06_2022_20:27:54/"
+    model_dir="models/fl_bert_02_07_2022_10:41:35/"
     log_dir=model_dir
     for i in range(1):
         model_name_or_path=model_dir#+"step_{}/".format(100)
@@ -46,7 +46,7 @@ def main():
                 # "--seed", "23",
             ]
             subprocess.run(l)
-    model_dir="models/random_online_bert_25_06_2022_20:27:54/"
+    model_dir="models/fl_bert_02_07_2022_10:41:35/"
     log_dir=model_dir
     for i in range(1):
         model_name_or_path=model_dir#+"step_{}/".format(100)

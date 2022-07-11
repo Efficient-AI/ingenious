@@ -158,7 +158,7 @@ class SMIStrategy():
                  metric='cosine', eta=1, stopIfZeroGain=False, 
                  stopIfNegativeGain=False, verbose=False, lambdaVal=1):
         """
-        Constructer method
+        Constructor method
         """
         # super().__init__(train_representations, query_representations, original_indices, smi_func_type, logger)
         self.train_rep = None
