@@ -17,6 +17,7 @@ import tqdm
 #from p_tqdm import p_umap
 # from cuml.cluster import KMeans
 # from submodlib import FacilityLocationMutualInformationFunction, FacilityLocationVariantMutualInformationFunction
+from sklearn.metrics.pairwise import cosine_similarity
 
 def query_generator(train_rep, query_rep, private_rep, partition_indices, partition_budget, smi_func_type, metric):
     """
@@ -32,6 +33,7 @@ def partition_subset_selection(partition_train_rep, partition_query_rep, partiti
     kernel_time = time.time()
     
     if smi_func_type in ['fl', 'gc', 'logdet', 'fl1mi', 'logdetmi', 'flcg', 'logdetcg', 'gccg']:
+        # data_sijs=cosine_similarity(partition_train_rep)
         data_sijs = submodlib.helper.create_kernel(X=partition_train_rep,
                                                     metric=metric, 
                                                     method='sklearn')

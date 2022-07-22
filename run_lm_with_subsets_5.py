@@ -26,8 +26,9 @@ from transformers import(
     get_scheduler
 )
 from transformers.utils.versions import require_version
-from cords.selectionstrategies.SL import KnnSMIStrategy
-import faiss
+from cords.selectionstrategies.SL import SMIStrategy
+import numpy as np
+from scipy import sparse
 
 logger=get_logger(__name__)
 require_version("datasets>=1.8.0", "To fix: pip install -r requirements.txt")
@@ -102,6 +103,18 @@ def parse_args():
         type=str,
         default=None,
         help="Pretrained config name or path if not the same as model_name",
+    )
+    parser.add_argument(
+        "--hidden_size", type=int, default=768, help="Hidden Size of language model",
+    )
+    parser.add_argument(
+        "--num_hidden_layers", type=int, default=12, help="Num Hidden Layers",
+    )
+    parser.add_argument(
+        "--num_attention_heads", type=int, default=12, help="Num attention heads",
+    )
+    parser.add_argument(
+        "--intermediate_size", type=int, default=3072, help="Intermediate size",
     )
     parser.add_argument(
         "--tokenizer_name",
@@ -235,24 +248,6 @@ def parse_args():
         default=None,
         help="If the training should continue from a checkpoint folder",
     )
-    parser.add_argument(
-        "--exploration_prob",
-        type=float,
-        default=0.15,
-        help="probability of exploration",
-    )
-    parser.add_argument("--knn_index_key", type=str, default=None, help="index type", required=True)
-    parser.add_argument("--knn_ngpu", type=int, default=-1, help="number of GPUs to use (default=all)")
-    parser.add_argument("--knn_tempmem", type=int, default=-1,help="use N bytes of temporary GPU memory")
-    parser.add_argument("--knn_altadd", action="store_true", help="Alternative add function, where the index is not stored on GPU during add. Slightly faster for big datasets on slow GPUs")
-    parser.add_argument("--knn_use_float16", action="store_true", help="use 16-bit floats on the GPU side")
-    parser.add_argument("--knn_noptables", action="store_false", help="Do not use precomputed tables in IVFPQ")
-    parser.add_argument("--knn_R", type=int, default=1, help="nb of replicas of the same dataset (the dataset will be copied across ngpu/R, default R=1)")
-    parser.add_argument("--knn_max_add", type=int, default=-1, help="copy sharded dataset to CPU each max_add additions (to avoid memory overflows with geometric reallocations)")
-    parser.add_argument("--knn_abs", type=int, default=32768, help="split adds in blocks of no more than N vectors")
-    parser.add_argument("--knn_qbs", type=int, default=16384, help="Split queries in blocks of no more than N vectors")
-    parser.add_argument("--knn_nprobe", type=int, default=128, help="try this number of probes")
-    parser.add_argument("--knn_nnn", type=int, default=10, help="search N neighbors for each query")
     args=parser.parse_args()
     return args
 
@@ -327,10 +322,10 @@ def main():
     else:
         config=BertConfig(
             vocab_size=args.vocab_size,
-            hidden_size=768,
-            num_hidden_layers=12,
-            num_attention_heads=12,
-            intermediate_size=3072,
+            hidden_size=args.hidden_size,
+            num_hidden_layers=args.num_hidden_layers,
+            num_attention_heads=args.num_attention_heads,
+            intermediate_size=args.intermediate_size,
             hidden_act="gelu",
             hidden_dropout_prob=0.1,
             attention_probs_dropout_prob=0.1,
@@ -639,7 +634,7 @@ def main():
         name=args.lr_scheduler_type,
         optimizer=optimizer,
         num_warmup_steps=args.num_warmup_steps,
-        num_training_steps=1000000,
+        num_training_steps=950000,
     )
 
     logger.info(f"Prepare model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader with accelerate.")
@@ -647,7 +642,8 @@ def main():
     model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader = accelerator.prepare(
         model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader)
     if args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
-        subset_strategy = KnnSMIStrategy(logger, args.selection_strategy,
+        subset_strategy = SMIStrategy(logger, args.selection_strategy,
+                                    num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
                                     optimizer='LazierThanLazyGreedy', similarity_criterion='feature', 
                                     metric='cosine', eta=1, stopIfZeroGain=False, 
                                     stopIfNegativeGain=False, verbose=False, lambdaVal=1)
@@ -660,6 +656,9 @@ def main():
     else:
         checkpointing_steps=None
     
+    loader=np.load("tfidf-vectorized.npz")
+    representations=sparse.csr_matrix((loader["data"], loader["indices"], loader["indptr"]), shape=loader["shape"])
+    logger.info("TF-IDF Representations Loaded")
     # Train!
     total_batch_size=args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
@@ -727,68 +726,22 @@ def main():
         logger.info(f"Steps {completed_steps}: perplexity: {perplexity}")
         if epoch==args.num_warmstart_epochs-1:
             logger.info("End the warm-start")
-    greedyList=[[]]
-    remaining_idx=[]
-    if (args.num_warmstart_epochs==0) or (args.resume_from_checkpoint):
-        start_time = time.time()
-        if args.selection_strategy == 'Random-Online':
-            if accelerator.is_main_process:
-                init_subset_indices = [random.sample(list(range(len(full_dataset))), num_samples)]
-            else:
-                init_subset_indices = [[]]
-        elif args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
-            pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
-            model.eval()
-            representations = []
-            batch_indices = []
-            total_cnt = 0
-            total_storage = 0
 
-            # for step, batch in enumerate(full_dataloader):
-            #     with torch.no_grad():
-            #         output=model(**batch, output_hidden_states=True)
-            #     embeddings=output['hidden_states'][args.layer_for_similarity_computation]
-            #     mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
-            #     mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
-            #     mask=mask*mask1
-            #     mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
-            #     mean_pooled = accelerator.gather(mean_pooled)
-            #     total_cnt += mean_pooled.size(0)
-            #     if accelerator.is_main_process:
-            #         mean_pooled = mean_pooled.cpu()
-            #         total_storage += sys.getsizeof(mean_pooled.storage())
-            #         representations.append(mean_pooled)
-            #     pbar.update(1)
-            if accelerator.is_main_process:
-                # representations = faiss.rand((41543418, 768))
-                representations=torch.cat(representations, dim = 0)
-                representations = representations[:len(full_dataset)]
-                total_storage += sys.getsizeof(representations.storage())
-                representations = representations.numpy()
-                logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
-                batch_indices=list(range(len(full_dataset)))
-                logger.info('Length of indices: {}'.format(len(batch_indices)))
-                logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
-            if accelerator.is_main_process:
-                subset_strategy.compute_kernel(num_samples, representations, index_key=args.knn_index_key, ngpu=args.knn_ngpu, tempmem=args.knn_tempmem, altadd=args.knn_altadd, use_float16=args.knn_use_float16, use_precomputed_tables=not args.knn_noptables, replicas=args.knn_R, max_add=args.knn_max_add, add_batch_size=args.knn_abs, query_batch_size=args.knn_qbs, nprobe=args.knn_nprobe, nnn=args.knn_nnn)
-                del representations
-                greedyList = [subset_strategy.select(num_samples, index_key=args.knn_index_key, ngpu=args.knn_ngpu, tempmem=args.knn_tempmem, altadd=args.knn_altadd, use_float16=args.knn_use_float16, use_precomputed_tables=not args.knn_noptables, replicas=args.knn_R, max_add=args.knn_max_add, add_batch_size=args.knn_abs, query_batch_size=args.knn_qbs, nprobe=args.knn_nprobe, nnn=args.knn_nnn)]
-                init_subset_indices=[[]]
-                greedyList=set(greedyList[0])
-                remaining_idx=[i for i in range(len(full_dataset)) if i not in greedyList]
-                random.shuffle(remaining_idx)
-                ptr=0
-                for idx in greedyList:
-                    if random.random()<args.exploration_prob:
-                        init_subset_indices[0].append(remaining_idx[ptr])
-                        ptr+=1
-                    else:
-                        init_subset_indices[0].append(idx)
-            else:
-                init_subset_indices = [[]]
-        accelerator.wait_for_everyone()
-        broadcast_object_list(init_subset_indices)
-        timing.append([0, (time.time() - start_time)])
+    start_time = time.time()
+    if args.selection_strategy == 'Random-Online':
+        if accelerator.is_main_process:
+            init_subset_indices = [random.sample(list(range(len(full_dataset))), num_samples)]
+        else:
+            init_subset_indices = [[]]
+    elif args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
+        batch_indices=list(range(len(full_dataset)))
+        if accelerator.is_main_process:
+            init_subset_indices = [subset_strategy.select(num_samples, batch_indices, representations, parallel_processes=args.parallel_processes)]
+        else:
+            init_subset_indices = [[]]
+    accelerator.wait_for_everyone()
+    broadcast_object_list(init_subset_indices)
+    timing.append([0, (time.time() - start_time)])
     if accelerator.is_main_process:
         output_file=f"subset_indices_after_step_{completed_steps}.pt"
         output_file=os.path.join(args.subset_dir, output_file)
@@ -840,56 +793,11 @@ def main():
                     else:
                         init_subset_indices = [[]]
                 elif args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
-                    # pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
-                    # model.eval()
-                    # representations = []
-                    # batch_indices = []
-                    # total_cnt = 0
-                    # total_storage = 0
-                    
-                    # for step, batch in enumerate(full_dataloader):
-                    #     with torch.no_grad():
-                    #         output=model(**batch, output_hidden_states=True)
-                    #     embeddings=output['hidden_states'][args.layer_for_similarity_computation]
-                    #     mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
-                    #     mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
-                    #     mask=mask*mask1
-                    #     mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
-                    #     mean_pooled = accelerator.gather(mean_pooled)
-                    #     total_cnt += mean_pooled.size(0)
-                    #     if accelerator.is_main_process:
-                    #         mean_pooled = mean_pooled.cpu()
-                    #         total_storage += sys.getsizeof(mean_pooled.storage())
-                    #         representations.append(mean_pooled)
-                    #     pbar.update(1)
-
-                    # if accelerator.is_main_process:
-                    #     # representations = torch.rand(41543424, 768)
-                    #     representations=torch.cat(representations, dim = 0)
-                    #     representations = representations[:len(full_dataset)]
-                    #     total_storage += sys.getsizeof(representations.storage())
-                    #     representations = representations.numpy()
-                    #     logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
-                    #     batch_indices=list(range(len(full_dataset)))
-                    #     logger.info('Length of indices: {}'.format(len(batch_indices)))
-                    #     logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
-                    
+                    batch_indices=list(range(len(full_dataset)))
                     if accelerator.is_main_process:
-                        init_subset_indices = [[]]
-                        random.shuffle(remaining_idx)
-                        ptr=0
-                        for idx in greedyList:
-                            if random.random()<args.exploration_prob:
-                                init_subset_indices[0].append(remaining_idx[ptr])
-                                ptr+=1
-                            else:
-                                init_subset_indices[0].append(idx)
+                        init_subset_indices = [subset_strategy.select(num_samples, batch_indices, representations, parallel_processes=args.parallel_processes)]
                     else:
                         init_subset_indices = [[]]
-
-                    # del representations
-                    # del batch_indices
-
                 accelerator.wait_for_everyone()
                 broadcast_object_list(init_subset_indices)
                 if accelerator.is_main_process:
