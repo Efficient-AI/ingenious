@@ -105,18 +105,6 @@ def parse_args():
         help="Pretrained config name or path if not the same as model_name",
     )
     parser.add_argument(
-        "--hidden_size", type=int, default=768, help="Hidden Size of language model",
-    )
-    parser.add_argument(
-        "--num_hidden_layers", type=int, default=12, help="Num Hidden Layers",
-    )
-    parser.add_argument(
-        "--num_attention_heads", type=int, default=12, help="Num attention heads",
-    )
-    parser.add_argument(
-        "--intermediate_size", type=int, default=3072, help="Intermediate size",
-    )
-    parser.add_argument(
         "--tokenizer_name",
         type=str,
         default=None,
@@ -322,10 +310,10 @@ def main():
     else:
         config=BertConfig(
             vocab_size=args.vocab_size,
-            hidden_size=args.hidden_size,
-            num_hidden_layers=args.num_hidden_layers,
-            num_attention_heads=args.num_attention_heads,
-            intermediate_size=args.intermediate_size,
+            hidden_size=768,
+            num_hidden_layers=12,
+            num_attention_heads=12,
+            intermediate_size=3072,
             hidden_act="gelu",
             hidden_dropout_prob=0.1,
             attention_probs_dropout_prob=0.1,
@@ -572,7 +560,8 @@ def main():
         train_dataset=dataset["train"]
         eval_dataset=dataset["validation"]
 
-    #Initial Random Subset Selection 
+    #Initial Random Subset Selection
+    subset_sent_freq=[0 for i in range(len(train_dataset))]
     if accelerator.is_main_process:
         num_samples = int(round(len(train_dataset) * args.subset_fraction, 0))
         init_subset_indices = [random.sample(list(range(len(train_dataset))), num_samples)]
@@ -580,6 +569,8 @@ def main():
         init_subset_indices = [[]]
     accelerator.wait_for_everyone()
     broadcast_object_list(init_subset_indices)
+    for idx in init_subset_indices[0]:
+        subset_sent_freq[idx]+=1
     full_dataset=train_dataset
     subset_dataset = full_dataset.select(init_subset_indices[0])
 
@@ -646,7 +637,7 @@ def main():
                                     num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
                                     optimizer='LazierThanLazyGreedy', similarity_criterion='feature', 
                                     metric='cosine', eta=1, stopIfZeroGain=False, 
-                                    stopIfNegativeGain=False, verbose=False, lambdaVal=1)
+                                    stopIfNegativeGain=False, verbose=False, lambdaVal=1, is_sparse=True)
     
     # Figure out how many steps we should save the Accelerator states
     if hasattr(args.checkpointing_steps, "isdigit"):
@@ -736,7 +727,35 @@ def main():
     elif args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
         batch_indices=list(range(len(full_dataset)))
         if accelerator.is_main_process:
-            init_subset_indices = [subset_strategy.select(num_samples, batch_indices, representations, parallel_processes=args.parallel_processes)]
+            budget=0.80*len(full_dataset)
+            partition_budget=math.ceil(budget/len(args.num_partitions))
+            greedyList = [subset_strategy.select(budget, batch_indices, representations, parallel_processes=args.parallel_processes)]
+            l=[]
+            for j in range(partition_budget):
+                for i in range(args.num_partitions):
+                    l.append(greedyList[0][i*partition_budget+j])
+            greedyList=[l]
+            selected=[False]*len(greedyList[0])
+            init_subset_indices=[[]]
+            freq=sorted(list(set(subset_sent_freq)))
+            i=0
+            while len(init_subset_indices[0])<num_samples:
+                if i>=len(freq):
+                    init_subset_indices[0].extend(greedyList[0][:(num_samples-len(init_subset_indices[0]))])
+                    break
+                l=[]
+                pbar=tqdm(range(len(greedyList[0])))
+                for j, idx in enumerate(greedyList[0]):
+                    if subset_sent_freq[idx]==freq[i] and selected[idx]==False:
+                        l.append(j)
+                        init_subset_indices[0].append(idx)
+                        selected[idx]=True
+                    if len(init_subset_indices[0])>=num_samples:
+                        break
+                    pbar.update(1)
+                i+=1
+            for idx in init_subset_indices[0]:
+                subset_sent_freq[idx]+=1
         else:
             init_subset_indices = [[]]
     accelerator.wait_for_everyone()
@@ -795,7 +814,33 @@ def main():
                 elif args.selection_strategy in ['fl2mi', 'fl1mi', 'logdetmi', 'gcmi', 'flcg', 'fl', 'gc', 'gccg', 'logdet', 'logdetcg']:
                     batch_indices=list(range(len(full_dataset)))
                     if accelerator.is_main_process:
-                        init_subset_indices = [subset_strategy.select(num_samples, batch_indices, representations, parallel_processes=args.parallel_processes)]
+                        budget=0.80*len(full_dataset)
+                        partition_budget=math.ceil(budget/len(args.num_partitions))
+                        greedyList = [subset_strategy.select(budget, batch_indices, representations, parallel_processes=args.parallel_processes)]
+                        l=[]
+                        for j in range(partition_budget):
+                            for i in range(args.num_partitions):
+                                l.append(greedyList[0][i*partition_budget+j])
+                        greedyList=[l]
+                        selected=[False]*len(full_dataset)
+                        init_subset_indices=[[]]
+                        freq=sorted(list(set(subset_sent_freq)))
+                        i=0
+                        while len(init_subset_indices[0])<num_samples:
+                            if i>=len(freq):
+                                init_subset_indices[0].extend(greedyList[0][:(num_samples-len(init_subset_indices[0]))])
+                                break
+                            l=[]
+                            for j, idx in enumerate(greedyList[0]):
+                                if subset_sent_freq[idx]==freq[i] and selected[idx]==False:
+                                    l.append(j)
+                                    init_subset_indices[0].append(idx)
+                                    selected[idx]=True
+                                if len(init_subset_indices[0])>=num_samples:
+                                    break
+                            i+=1
+                        for idx in init_subset_indices[0]:
+                            subset_sent_freq[idx]+=1
                     else:
                         init_subset_indices = [[]]
                 accelerator.wait_for_everyone()

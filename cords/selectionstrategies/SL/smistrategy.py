@@ -19,24 +19,26 @@ import tqdm
 # from submodlib import FacilityLocationMutualInformationFunction, FacilityLocationVariantMutualInformationFunction
 from sklearn.metrics.pairwise import cosine_similarity
 
-def query_generator(train_rep, query_rep, private_rep, partition_indices, partition_budget, smi_func_type, metric):
+def query_generator(train_rep, query_rep, private_rep, partition_indices, partition_budget, smi_func_type, metric, is_sparse):
     """
     Generate queries for imap_unordered
     """
     for partition in partition_indices:
-        yield (train_rep[partition], query_rep, private_rep, smi_func_type, metric, partition, partition_budget)
+        yield (train_rep[partition], query_rep, private_rep, smi_func_type, metric, partition, partition_budget, is_sparse)
 
 def partition_subset_star(args):
         return partition_subset_selection(*args)
     
-def partition_subset_selection(partition_train_rep, partition_query_rep, partition_private_rep, smi_func_type, metric, partition_indices, partition_budget):
+def partition_subset_selection(partition_train_rep, partition_query_rep, partition_private_rep, smi_func_type, metric, partition_indices, partition_budget, is_sparse):
     kernel_time = time.time()
     
     if smi_func_type in ['fl', 'gc', 'logdet', 'fl1mi', 'logdetmi', 'flcg', 'logdetcg', 'gccg']:
-        # data_sijs=cosine_similarity(partition_train_rep)
-        data_sijs = submodlib.helper.create_kernel(X=partition_train_rep,
-                                                    metric=metric, 
-                                                    method='sklearn')
+        if is_sparse:
+            data_sijs=cosine_similarity(partition_train_rep)
+        else:
+            data_sijs = submodlib.helper.create_kernel(X=partition_train_rep,
+                                                        metric=metric, 
+                                                        method='sklearn')
 
     
     if smi_func_type in ['fl1mi', 'fl2mi', 'logdetmi', 'gcmi']:
@@ -158,7 +160,7 @@ class SMIStrategy():
                  num_partitions=20, partition_strategy='random',
                  optimizer='LazyGreedy', similarity_criterion='feature', 
                  metric='cosine', eta=1, stopIfZeroGain=False, 
-                 stopIfNegativeGain=False, verbose=False, lambdaVal=1):
+                 stopIfNegativeGain=False, verbose=False, lambdaVal=1, is_sparse=False):
         """
         Constructor method
         """
@@ -179,6 +181,7 @@ class SMIStrategy():
         self.verbose = verbose
         self.lambdaVal = lambdaVal
         self.similarity_criterion = similarity_criterion
+        self.is_sparse=is_sparse
     
     # def update_representations(self, train_representations, query_representations, indices):
     #     self.train_rep = train_representations
@@ -271,7 +274,7 @@ class SMIStrategy():
         with Pool(parallel_processes) as pool:
             #greedyIdxs = pool.starmap(self.partition_subset_selection, queries)
             greedyIdxs_list = list(tqdm.tqdm(pool.imap_unordered(partition_subset_star, 
-                                                query_generator(representations, query_representations, private_representations, partition_indices, partition_budget_split, self.smi_func_type, self.metric)), total=len(partition_indices)))
+                                                query_generator(representations, query_representations, private_representations, partition_indices, partition_budget_split, self.smi_func_type, self.metric, self.is_sparse)), total=len(partition_indices)))
         #greedyIdxs_list = p_umap(partition_subset_star, queries)
         greedyIdxs = []
         for idxs in greedyIdxs_list:

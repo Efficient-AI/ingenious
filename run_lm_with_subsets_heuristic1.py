@@ -748,8 +748,14 @@ def main():
             logger.info('Length of indices: {}'.format(len(batch_indices)))
             logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
         if accelerator.is_main_process:
-            greedyList = [subset_strategy.select(0.80*len(full_dataset), batch_indices, representations, parallel_processes=args.parallel_processes)]
-            # greedyList=[list(range(int(0.80*len(full_dataset))))]
+            budget=0.80*len(full_dataset)
+            partition_budget=math.ceil(budget/len(args.num_partitions))
+            greedyList = [subset_strategy.select(budget, batch_indices, representations, parallel_processes=args.parallel_processes)]
+            l=[]
+            for j in range(partition_budget):
+                for i in range(args.num_partitions):
+                    l.append(greedyList[0][i*partition_budget+j])
+            greedyList=[l]
             selected=[False]*len(greedyList[0])
             init_subset_indices=[[]]
             freq=sorted(list(set(subset_sent_freq)))
@@ -862,8 +868,14 @@ def main():
                         logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
                     
                     if accelerator.is_main_process:
-                        greedyList = [subset_strategy.select(0.80*len(full_dataset), batch_indices, representations, parallel_processes=args.parallel_processes)]
-                        # greedyList=[list(range(int(0.80*len(full_dataset))))]
+                        budget=0.80*len(full_dataset)
+                        partition_budget=math.ceil(budget/len(args.num_partitions))
+                        greedyList = [subset_strategy.select(budget, batch_indices, representations, parallel_processes=args.parallel_processes)]
+                        l=[]
+                        for j in range(partition_budget):
+                            for i in range(args.num_partitions):
+                                l.append(greedyList[0][i*partition_budget+j])
+                        greedyList=[l]
                         selected=[False]*len(full_dataset)
                         init_subset_indices=[[]]
                         freq=sorted(list(set(subset_sent_freq)))
