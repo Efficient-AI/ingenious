@@ -749,7 +749,7 @@ def main():
             logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
         if accelerator.is_main_process:
             budget=0.80*len(full_dataset)
-            partition_budget=math.ceil(budget/len(args.num_partitions))
+            partition_budget=math.ceil(budget/args.num_partitions)
             greedyList = [subset_strategy.select(budget, batch_indices, representations, parallel_processes=args.parallel_processes)]
             l=[]
             for j in range(partition_budget):
@@ -869,7 +869,7 @@ def main():
                     
                     if accelerator.is_main_process:
                         budget=0.80*len(full_dataset)
-                        partition_budget=math.ceil(budget/len(args.num_partitions))
+                        partition_budget=math.ceil(budget/args.num_partitions)
                         greedyList = [subset_strategy.select(budget, batch_indices, representations, parallel_processes=args.parallel_processes)]
                         l=[]
                         for j in range(partition_budget):
