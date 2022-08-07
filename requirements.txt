@@ -1,9 +1,10 @@
-tqdm
-datasets
-transformers
-sentencepiece
-tokenizers
-scipy
-sklearn
-matplotlib
-apricot-select
+accelerate @ git+https://github.com/huggingface/accelerate@64e41a49955b77af10918bbbec5106747a1fa249
+tqdm==4.64.0
+datasets==2.2.1
+transformers==4.19.1
+sentencepiece==0.1.96
+tokenizers==0.12.1
+scipy==1.7.3
+sklearn==0.0
+matplotlib==3.5.2
+apricot-select==0.6.1

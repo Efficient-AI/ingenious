@@ -7,3 +7,4 @@ from .gradmatchstrategy import GradMatchStrategy
 from .fixedweightstrategy import FixedWeightStrategy
 from .smistrategy import SMIStrategy
 from .knn_smistrategy import KnnSMIStrategy
+from .submodstrategy import SubmodStrategy

@@ -19,3 +19,6 @@ bookcorpus.tar.bz2
 /wikipedia_prepared/
 /bookscorpus_prepared/
 /useful-data/
+/partitions/
+test.ipynb
+test.py
