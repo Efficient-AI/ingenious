@@ -5,9 +5,9 @@ from datetime import datetime
 def main():
     now=datetime.now()
     timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
-    log_dir="./logs/test_bert_"+timestamp+"/"
-    model_dir="./models/test_bert_"+timestamp +"/"
-    subset_dir="./subsets/test_bert_"+timestamp+"/"
+    log_dir="./logs/fl_bert_"+timestamp+"/"
+    model_dir="./models/fl_bert_"+timestamp +"/"
+    subset_dir="./subsets/fl_bert_"+timestamp+"/"
     partitions_dir="./partitions/fl_bert_"+timestamp+"/"
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(subset_dir, exist_ok=True)
@@ -41,12 +41,12 @@ def main():
         "--short_seq_prob", "0.1",
         "--nsp_probability", "0.5",
         "--subset_fraction", "0.25",
-        "--select_every", "10",
+        "--select_every", "25000",
         "--partition_strategy", "kmeans_clustering",
         "--layer_for_similarity_computation", "9",
         "--num_partitions", "2048",
         "--selection_strategy", "fl",
-        "--parallel_processes", "96",
+        "--parallel_processes", "84",
         "--num_warmstart_epochs", "0",
         "--checkpointing_steps", "25000",
     ]
