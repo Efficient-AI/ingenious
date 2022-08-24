@@ -97,6 +97,9 @@ class SubmodStrategy():
             partition_indices[lab].append(indices[i])
         kmeans_end_time=time.time()
         self.logger.info("Kmeans routine took %.4f of time", kmeans_end_time-kmeans_start_time)
+        del kmeans
+        pickle.dump(partition_indices, open("partitions.pkl", "wb"))
+        # partition_indices=pickle.load(open("/home/sumbhati/ingenious/LM-pretraining/partitions.pkl", "rb"))
         return partition_indices
     
     def select(self, budget, indices, representations, parallel_processes=96):

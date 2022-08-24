@@ -22,3 +22,4 @@ bookcorpus.tar.bz2
 /partitions/
 test.ipynb
 test.py
+representations.pt

@@ -6,5 +6,5 @@ from .submodularselectionstrategy import SubmodularSelectionStrategy
 from .gradmatchstrategy import GradMatchStrategy
 from .fixedweightstrategy import FixedWeightStrategy
 from .smistrategy import SMIStrategy
-from .knn_smistrategy import KnnSMIStrategy
+from .knn_smistrategy import KnnSubmodStrategy
 from .submodstrategy import SubmodStrategy
