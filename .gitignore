@@ -23,3 +23,6 @@ bookcorpus.tar.bz2
 test.ipynb
 test.py
 representations.pt
+col_ind.npy
+data.npy
+row_ind.npy

@@ -787,23 +787,23 @@ def main():
                 logger.info('Length of indices: {}'.format(len(batch_indices)))
                 logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
             if accelerator.is_main_process:
-                subset_strategy.compute_sparse_kernel(representations, index_key=args.knn_index_key, logger=logger, ngpu=args.knn_ngpu, tempmem=args.knn_tempmem, altadd=args.knn_altadd, use_float16=args.knn_use_float16, use_precomputed_tables=not args.knn_noptables, replicas=args.knn_R, max_add=args.knn_max_add, add_batch_size=args.knn_abs, query_batch_size=args.knn_qbs, nprobe=args.knn_nprobe, nnn=args.knn_nnn)
+                subset_strategy.compute_sparse_kernel(representations, index_key=args.knn_index_key, ngpu=args.knn_ngpu, tempmem=args.knn_tempmem, altadd=args.knn_altadd, use_float16=args.knn_use_float16, use_precomputed_tables=not args.knn_noptables, replicas=args.knn_R, max_add=args.knn_max_add, add_batch_size=args.knn_abs, query_batch_size=args.knn_qbs, nprobe=args.knn_nprobe, nnn=args.knn_nnn)
                 del representations
                 greedyList = [subset_strategy.select(num_samples, nnn=args.knn_nnn)]
                 init_subset_indices=[[]]
                 greedyList=set(greedyList[0])
                 remaining_idx=[i for i in range(len(full_dataset)) if i not in greedyList]
                 random.shuffle(remaining_idx)
-                ptr=0
+                # ptr=0
                 for idx in greedyList:
-                    if args.resume_from_checkpoint:
-                        if random.random()<args.exploration_prob:
-                            init_subset_indices[0].append(remaining_idx[ptr])
-                            ptr+=1
-                        else:
-                            init_subset_indices[0].append(idx)
-                    else:
-                        init_subset_indices[0].append(idx)
+                    # if args.resume_from_checkpoint:
+                    #     if random.random()<args.exploration_prob:
+                    #         init_subset_indices[0].append(remaining_idx[ptr])
+                    #         ptr+=1
+                    #     else:
+                    #         init_subset_indices[0].append(idx)
+                    # else:
+                    init_subset_indices[0].append(idx)
             else:
                 init_subset_indices = [[]]
         accelerator.wait_for_everyone()

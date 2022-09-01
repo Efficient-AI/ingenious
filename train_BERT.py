@@ -1,17 +1,18 @@
 import os
 import subprocess
 from datetime import datetime
-
 def main():
     now=datetime.now()
     timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
-    log_dir="./logs/fl_bert_"+timestamp+"/"
-    model_dir="./models/fl_bert_"+timestamp +"/"
-    subset_dir="./subsets/fl_bert_"+timestamp+"/"
+    log_dir="./logs/test_bert_"+timestamp+"/"
+    model_dir="./models/test_bert_"+timestamp +"/"
+    subset_dir="./subsets/test_bert_"+timestamp+"/"
+    # partitions_dir="./partitions/test_bert_"+timestamp+"/"
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(subset_dir, exist_ok=True)
+    # os.makedirs(partitions_dir, exist_ok=True)
     l=[
-        "accelerate", "launch", "run_lm_with_subsets_knn.py",
+        "accelerate", "launch", "run_lm_with_subsets_global_ordering.py",
         "--preprocessed",
         "--log_dir", log_dir,
         "--subset_dir", subset_dir,
@@ -36,21 +37,18 @@ def main():
         "--nsp_probability", "0.5",
         "--subset_fraction", "0.25",
         "--select_every", "25000",
+        "--partition_strategy", "random",
         "--layer_for_similarity_computation", "9",
+        "--num_partitions", "5000",
         "--selection_strategy", "fl",
-        "--num_warmstart_epochs", "3",
+        "--parallel_processes", "96",
+        "--num_warmstart_epochs", "0",
         "--checkpointing_steps", "25000",
-        "--knn_index_key", "IVF65536,PQ64",
-        "--knn_ngpu", "8",
-        "--knn_tempmem", "0",
-        "--knn_nnn", "90",
-        "--knn_use_float16",
     ]
     with open(log_dir+"parameters.txt", "w") as f:
         for item in l:
             f.write(item)
             f.write("\n")
     subprocess.run(l)
-
 if __name__=="__main__":
     main()

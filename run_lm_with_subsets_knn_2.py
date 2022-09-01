@@ -787,7 +787,7 @@ def main():
                 logger.info('Length of indices: {}'.format(len(batch_indices)))
                 logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
             if accelerator.is_main_process:
-                subset_strategy.compute_sparse_kernel(representations, index_key=args.knn_index_key, logger=logger, ngpu=args.knn_ngpu, tempmem=args.knn_tempmem, altadd=args.knn_altadd, use_float16=args.knn_use_float16, use_precomputed_tables=not args.knn_noptables, replicas=args.knn_R, max_add=args.knn_max_add, add_batch_size=args.knn_abs, query_batch_size=args.knn_qbs, nprobe=args.knn_nprobe, nnn=args.knn_nnn)
+                subset_strategy.compute_sparse_kernel(representations, index_key=args.knn_index_key, ngpu=args.knn_ngpu, tempmem=args.knn_tempmem, altadd=args.knn_altadd, use_float16=args.knn_use_float16, use_precomputed_tables=not args.knn_noptables, replicas=args.knn_R, max_add=args.knn_max_add, add_batch_size=args.knn_abs, query_batch_size=args.knn_qbs, nprobe=args.knn_nprobe, nnn=args.knn_nnn)
                 del representations
                 greedyList = [subset_strategy.select(num_samples, nnn=args.knn_nnn)]
                 init_subset_indices=[[]]

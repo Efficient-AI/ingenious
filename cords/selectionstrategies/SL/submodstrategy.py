@@ -9,14 +9,14 @@ import submodlib
 import faiss
 import pickle
 
-def query_generator(representations, partition_indices, partition_budgets, smi_func_type, metric, sparse_rep):
+def query_generator(representations, partition_indices, partition_budgets, smi_func_type, metric, sparse_rep, return_gains):
     for i, partition in enumerate(partition_indices):
-        yield (representations[partition], partition_budgets[i], partition, smi_func_type, metric, sparse_rep)
+        yield (representations[partition], partition_budgets[i], partition, smi_func_type, metric, sparse_rep, return_gains)
 
 def partition_subset_strat(args):
         return partition_subset_selection(*args)
     
-def partition_subset_selection(representations, partition_budget, partition_ind, smi_func_type, metric, sparse_rep):
+def partition_subset_selection(representations, partition_budget, partition_ind, smi_func_type, metric, sparse_rep, return_gains):
     kernel_time=time.time()
     if smi_func_type in ["fl", "logdet", "gc"]:
         if sparse_rep:
@@ -51,7 +51,10 @@ def partition_subset_selection(representations, partition_budget, partition_ind,
     if smi_func_type in ["fl", "logdet", "gc"]:
         del data_sijs
     #Converting selected indices to global indices
-    return [partition_ind[x[0]] for x in greedyList]
+    if return_gains:
+        return ([partition_ind[x[0]] for x in greedyList], [x[1] for x in greedyList])
+    else:
+        return [partition_ind[x[0]] for x in greedyList]
 
 class SubmodStrategy():
     def __init__(self, logger, smi_func_type, 
@@ -102,13 +105,13 @@ class SubmodStrategy():
         # partition_indices=pickle.load(open("/home/sumbhati/ingenious/LM-pretraining/partitions.pkl", "rb"))
         return partition_indices
     
-    def select(self, budget, indices, representations, parallel_processes=96):
+    def select(self, budget, indices, representations, parallel_processes=96, return_gains=False):
         smi_start_time=time.time()
         
         # return partitions of the data for subset selection
         if self.partition_strategy=="random":
             partition_indices=self.random_partition(self.num_partitions, indices)
-            partition_budgets=[math.ceil((len(partition)/len(indices)) * budget) for partition in partition_indices]
+            partition_budgets=[min(math.ceil((len(partition)/len(indices)) * budget), len(partition)-1) for partition in partition_indices]
         elif self.partition_strategy=="kmeans_clustering":
             partition_indices=self.kmeans_partition(self.num_partitions, representations, indices)
             partition_budgets=[min(math.ceil((len(partition)/len(indices)) * budget), len(partition)-1) for partition in partition_indices]
@@ -124,10 +127,12 @@ class SubmodStrategy():
         # Parallel computation of subsets
         with Pool(parallel_processes) as pool:
             greedyIdx_list=list(tqdm.tqdm(pool.imap_unordered(partition_subset_strat, 
-                                                    query_generator(representations, partition_indices, partition_budgets, self.smi_func_type, self.metric, self.sparse_rep)), total=len(partition_indices)))
+                                                    query_generator(representations, partition_indices, partition_budgets, self.smi_func_type, self.metric, self.sparse_rep, return_gains)), total=len(partition_indices)))
         
-        # with ProcessingPool(nodes=parallel_processes) as pool:
-        #     greedyIdx_list=list(tqdm.tqdm(pool.uimap(partition_subset_strat, query_generator(representations, partition_indices, partition_budgets, self.smi_func_type, self.metric, self.sparse_rep)), total=len(partition_indices)))
+        if return_gains:
+            gains=[p[1] for p in greedyIdx_list]
+            greedyIdx_list=[p[0] for p in greedyIdx_list]
+
         greedyIdxs=[]
         for idxs in greedyIdx_list:
             greedyIdxs.extend(idxs)
@@ -136,4 +141,7 @@ class SubmodStrategy():
         # assert len(set(originalIdxs))==sum(partition_budgets), "Selected subset must be equal to the budget"
         smi_end_time=time.time()
         self.logger.info("SMI algorithm subset selection time is %.4f", smi_end_time-smi_start_time)
-        return partition_indices, originalIdxs
+        if return_gains:
+            return partition_indices, originalIdxs, gains
+        else:
+            return partition_indices, originalIdxs

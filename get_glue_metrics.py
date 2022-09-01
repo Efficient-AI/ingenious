@@ -2,7 +2,7 @@ import os
 import subprocess
 
 def main():
-    model_dir="/home/sumbhati/ingenious/LM-pretraining/models/fl_from_fl_19_07_2022_bert_20_07_2022_14:32:03/"
+    model_dir="/home/sumbhati/ingenious/LM-pretraining/models/fl_bert_30_08_2022_17:12:40/"
     log_dir=model_dir
     for i in range(1, 4):
         model_name_or_path=model_dir#+"step_{}/".format(100)
