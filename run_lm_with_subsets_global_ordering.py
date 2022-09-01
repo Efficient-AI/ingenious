@@ -31,6 +31,7 @@ from accelerate import InitProcessGroupKwargs
 from helper_fns import taylor_softmax_v1
 import numpy as np
 import faiss
+import pickle
 
 logger=get_logger(__name__)
 require_version("datasets>=1.8.0", "To fix: pip install -r requirements.txt")
@@ -742,7 +743,7 @@ def main():
     probs=[]
     greedyList=[]
     gains=[]
-    if (args.num_warmstart_epochs==0) or (args.resume_from_checkpoint):##########################################
+    if (args.num_warmstart_epochs!=0) or (args.resume_from_checkpoint):
         start_time = time.time()
         if args.selection_strategy == 'Random-Online':
             if accelerator.is_main_process:
@@ -757,24 +758,24 @@ def main():
             total_cnt = 0
             total_storage = 0
 
-            # for step, batch in enumerate(full_dataloader):
-            #     with torch.no_grad():
-            #         output=model(**batch, output_hidden_states=True)
-            #     embeddings=output['hidden_states'][args.layer_for_similarity_computation]
-            #     mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
-            #     mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
-            #     mask=mask*mask1
-            #     mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
-            #     mean_pooled = accelerator.gather(mean_pooled)
-            #     total_cnt += mean_pooled.size(0)
-            #     if accelerator.is_main_process:
-            #         mean_pooled = mean_pooled.cpu()
-            #         total_storage += sys.getsizeof(mean_pooled.storage())
-            #         representations.append(mean_pooled)
-            #     pbar.update(1)
+            for step, batch in enumerate(full_dataloader):
+                with torch.no_grad():
+                    output=model(**batch, output_hidden_states=True)
+                embeddings=output['hidden_states'][args.layer_for_similarity_computation]
+                mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
+                mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
+                mask=mask*mask1
+                mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
+                mean_pooled = accelerator.gather(mean_pooled)
+                total_cnt += mean_pooled.size(0)
+                if accelerator.is_main_process:
+                    mean_pooled = mean_pooled.cpu()
+                    total_storage += sys.getsizeof(mean_pooled.storage())
+                    representations.append(mean_pooled)
+                pbar.update(1)
             if accelerator.is_main_process:
-                representations = torch.from_numpy(faiss.rand((41543418, 768)))
-                # representations=torch.cat(representations, dim = 0)
+                # representations = torch.from_numpy(faiss.rand((41543418, 768)))
+                representations=torch.cat(representations, dim = 0)
                 representations = representations[:len(full_dataset)]
                 total_storage += sys.getsizeof(representations.storage())
                 representations = representations.numpy()
@@ -803,9 +804,10 @@ def main():
         output_file=f"subset_indices_after_step_{completed_steps}.pt"
         output_file=os.path.join(args.subset_dir, output_file)
         torch.save(torch.tensor(init_subset_indices[0]), output_file)
-        output_file=f"gains_after_step_{completed_steps}.pt"
+        output_file=f"gains_after_step_{completed_steps}.pkl"
         output_file=os.path.join(args.subset_dir, output_file)
-        torch.save(torch.tensor(gains), output_file)
+        with open(output_file, "wb") as f:
+            pickle.dump(gains, f)
     accelerator.wait_for_everyone()
     subset_dataset = full_dataset.select(init_subset_indices[0])
     subset_dataloader=DataLoader(

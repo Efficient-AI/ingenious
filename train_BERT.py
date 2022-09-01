@@ -4,10 +4,10 @@ from datetime import datetime
 def main():
     now=datetime.now()
     timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
-    log_dir="./logs/test_bert_"+timestamp+"/"
-    model_dir="./models/test_bert_"+timestamp +"/"
-    subset_dir="./subsets/test_bert_"+timestamp+"/"
-    # partitions_dir="./partitions/test_bert_"+timestamp+"/"
+    log_dir="./logs/fl_bert_"+timestamp+"/"
+    model_dir="./models/fl_bert_"+timestamp +"/"
+    subset_dir="./subsets/fl_bert_"+timestamp+"/"
+    # partitions_dir="./partitions/fl_bert_"+timestamp+"/"
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(subset_dir, exist_ok=True)
     # os.makedirs(partitions_dir, exist_ok=True)
@@ -42,7 +42,7 @@ def main():
         "--num_partitions", "5000",
         "--selection_strategy", "fl",
         "--parallel_processes", "96",
-        "--num_warmstart_epochs", "0",
+        "--num_warmstart_epochs", "2",
         "--checkpointing_steps", "25000",
     ]
     with open(log_dir+"parameters.txt", "w") as f:
