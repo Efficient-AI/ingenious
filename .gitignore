@@ -26,3 +26,7 @@ representations.pt
 col_ind.npy
 data.npy
 row_ind.npy
+/openwebtext/
+/openwebtext_prepared_1024/
+/openwebtext_sample/
+/openwebtext_sample_prepared/
