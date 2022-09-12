@@ -7,16 +7,16 @@ def main():
     log_dir="./logs/fl_bert_"+timestamp+"/"
     model_dir="./models/fl_bert_"+timestamp +"/"
     subset_dir="./subsets/fl_bert_"+timestamp+"/"
-    partitions_dir="./partitions/fl_bert_"+timestamp+"/"
+    # partitions_dir="./partitions/fl_bert_"+timestamp+"/"
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(subset_dir, exist_ok=True)
-    os.makedirs(partitions_dir, exist_ok=True)
+    # os.makedirs(partitions_dir, exist_ok=True)
     l=[
-        "accelerate", "launch", "run_lm_with_subsets.py",
+        "accelerate", "launch", "run_lm_with_subsets_global_ordering.py",
         "--preprocessed",
         "--log_dir", log_dir,
         "--subset_dir", subset_dir,
-        "--partitions_dir", partitions_dir,
+        # "--partitions_dir", partitions_dir,
         "--load_data_from_disk",
         "--data_directory", "./bert_dataset_prepared",
         "--tokenizer_name", "bert-base-uncased",
@@ -27,7 +27,7 @@ def main():
         "--learning_rate", "1e-4",
         "--lr_max_steps", "1000000",
         "--weight_decay" ,"0.01",
-        "--max_train_steps", "250000",
+        "--max_train_steps", "500000",
         "--gradient_accumulation_steps", "1",
         "--num_warmup_steps", "10000",
         "--output_dir", model_dir,
@@ -37,13 +37,13 @@ def main():
         "--short_seq_prob", "0.1",
         "--nsp_probability", "0.5",
         "--subset_fraction", "0.25",
-        "--select_every", "50000",
+        "--select_every", "25000",
         "--partition_strategy", "random",
         "--layer_for_similarity_computation", "9",
-        "--num_partitions", "5000",
+        "--num_partitions", "1500",
         "--selection_strategy", "fl",
-        "--parallel_processes", "96",
-        "--num_warmstart_epochs", "0",
+        "--parallel_processes", "48",
+        "--num_warmstart_epochs", "2",
         "--checkpointing_steps", "25000",
     ]
     with open(log_dir+"parameters.txt", "w") as f:

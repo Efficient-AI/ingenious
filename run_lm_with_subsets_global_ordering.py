@@ -808,6 +808,10 @@ def main():
         output_file=os.path.join(args.subset_dir, output_file)
         with open(output_file, "wb") as f:
             pickle.dump(gains, f)
+        output_file=f"partition_indices_after_step_{completed_steps}.pkl"
+        output_file=os.path.join(args.subset_dir, output_file)
+        with open(output_file, "wb") as f:
+            pickle.dump(partition_indices, f)
     accelerator.wait_for_everyone()
     subset_dataset = full_dataset.select(init_subset_indices[0])
     subset_dataloader=DataLoader(

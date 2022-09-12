@@ -52,12 +52,6 @@ def parse_args():
         help="The directory to which information regarding selected subsets should be stored"
     )
     parser.add_argument(
-        "--partitions_dir",
-        type=str,
-        required=True,
-        help="The directory to which information regarding the partitions should be stored"
-    )
-    parser.add_argument(
         "--preprocessed",
         action="store_true",
         help="If passed, already preprocessed data needs to be given and training will start right away"
