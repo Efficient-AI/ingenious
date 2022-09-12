@@ -30,3 +30,12 @@ row_ind.npy
 /openwebtext_prepared_1024/
 /openwebtext_sample/
 /openwebtext_sample_prepared/
+/cache/
+/tasks/
+/jiant-env/
+tfidf-dataset.pkl
+sample
+openwebtext_tfidf_vectors.npz
+/openwebtext_sents_dataset/
+/openwebtext_for_tfidf/
+prepare_sents.py
