@@ -59,7 +59,7 @@ def main():
         "--subset_fraction", "0.25",
         "--select_every", "25000",
         "--partition_strategy", "random",
-        "--layer_for_similarity_computation", "9",
+        "--layer_for_similarity_computation", "12",
         "--num_partitions", "1500",
         "--selection_strategy", "fl",
         "--parallel_processes", "48",
