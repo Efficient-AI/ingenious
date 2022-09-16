@@ -1,7 +1,26 @@
 import os
 import subprocess
 from datetime import datetime
+import argparse
+
+def parse_args():
+    parser=argparse.ArgumentParser(description="train BERT")
+    parser.add_argument(
+        "--visible_gpus",
+        type=str,
+        help="visible_gpus"
+    )
+    parser.add_argument(
+        "--main_process_port",
+        type=int,
+        default=55555,
+        help="main process port for accelerate launch"
+    )
+    args=parser.parse_args()
+    return args
+
 def main(): 
+    args=parse_args()
     now=datetime.now()
     timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
     log_dir="./logs/fl_bert_"+timestamp+"/"
@@ -11,8 +30,9 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(subset_dir, exist_ok=True)
     # os.makedirs(partitions_dir, exist_ok=True)
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.visible_gpus
     l=[
-        "accelerate", "launch", "run_lm_with_subsets_global_ordering.py",
+        "accelerate", "launch", "--main_process_port", f"{args.main_process_port}", "run_lm_with_subsets_global_ordering.py",
         "--preprocessed",
         "--log_dir", log_dir,
         "--subset_dir", subset_dir,

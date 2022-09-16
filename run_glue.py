@@ -183,7 +183,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=75000))
+    # torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=75000))
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will pick up all supported trackers in the environment
     accelerator = Accelerator(log_with="all", logging_dir=args.output_dir) if args.with_tracking else Accelerator()
