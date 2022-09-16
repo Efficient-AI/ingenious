@@ -634,7 +634,7 @@ def main():
         name=args.lr_scheduler_type,
         optimizer=optimizer,
         num_warmup_steps=args.num_warmup_steps,
-        num_training_steps=1000000,
+        num_training_steps=750000,
     )
 
     logger.info(f"Prepare model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader with accelerate.")
@@ -646,7 +646,7 @@ def main():
                                     num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
                                     optimizer='LazierThanLazyGreedy', similarity_criterion='feature', 
                                     metric='cosine', eta=1, stopIfZeroGain=False, 
-                                    stopIfNegativeGain=False, verbose=False, lambdaVal=1)
+                                    stopIfNegativeGain=False, verbose=False, lambdaVal=1, is_sparse=True)
     
     # Figure out how many steps we should save the Accelerator states
     if hasattr(args.checkpointing_steps, "isdigit"):

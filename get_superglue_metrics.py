@@ -23,12 +23,12 @@ def main():
     args=parse_args()
     tasks=[
         # "cola", "mnli", "mrpc", "qnli", "qqp", "sst", "stsb", "wnli", "rte",
-        # "boolq", "cb", "copa", "multirc", "wic", "wsc", #"record",
-        "boolq",
+        "boolq", "cb", "copa", "multirc", "wic", "wsc", #"record",
+        # "boolq",
     ]
     model_dir=args.model_dir
     for task in tasks:
-        for i in range(1, 6):
+        for i in range(1, 21):
             jiant_run_config = configurator.SimpleAPIMultiTaskConfigurator(
                 task_config_base_path="./tasks/configs",
                 task_cache_base_path="./cache",
