@@ -576,7 +576,7 @@ def main():
     probs=[]
     greedyList=[]
     gains=[]
-    if (args.num_warmstart_epochs!=0) or (args.resume_from_checkpoint):
+    if (args.num_warmstart_epochs>0) or (args.resume_from_checkpoint):
         start_time = time.time()
         if args.selection_strategy == 'Random-Online':
             if accelerator.is_main_process:
@@ -592,17 +592,19 @@ def main():
             for step, batch in enumerate(full_dataloader):
                 with torch.no_grad():
                     output=model(**batch, output_hidden_states=True)
-                embeddings=output["hidden_states"][args.layer_for_similarity_computation][-1]
-                last_token_indices=torch.cat((batch["attention_mask"], torch.zeros((embeddings.shape[0],1))), dim=1).argmin(axis=1)-1
-                embeddings=torch.cat([embeddings[i][last_token_indices[i]].reshape((1,-1)) for i in range(embeddings.shape[0])], dim=0)
+                embeddings=output["hidden_states"][args.layer_for_similarity_computation]
+                attention_mask=batch['attention_mask']
                 embeddings=accelerator.gather(embeddings)
+                attention_mask=accelerator.gather(attention_mask)
                 total_cnt+=embeddings.size(0)
                 if accelerator.is_main_process:
                     embeddings=embeddings.cpu()
+                    attention_mask=attention_mask.cpu()
+                    last_token_indices=torch.cat((attention_mask, torch.zeros((embeddings.shape[0],1))), dim=1).argmin(axis=1)-1
+                    embeddings=torch.cat([embeddings[i][last_token_indices[i]].reshape((1,-1)) for i in range(embeddings.shape[0])], dim=0)
                     total_storage+=sys.getsizeof(embeddings.storage())
                     representations.append(embeddings)
                 pbar.update(1)
-            
             if accelerator.is_main_process:
                 representations=torch.cat(representations, dim=0)
                 representations = representations[:len(full_dataset)]

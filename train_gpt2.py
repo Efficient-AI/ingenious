@@ -5,13 +5,13 @@ from datetime import datetime
 def main():
     now=datetime.now()
     timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
-    log_dir="./logs/gpt2_fl_tfidf_"+timestamp+"/"
-    subset_dir="./subsets/gpt2_fl_tfidf_"+timestamp+"/"
-    model_dir="./models/gpt2_fl_tfidf_"+timestamp +"/"
+    log_dir="./logs/gpt2_fl_"+timestamp+"/"
+    subset_dir="./subsets/gpt2_fl_"+timestamp+"/"
+    model_dir="./models/gpt2_fl_"+timestamp +"/"
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(subset_dir, exist_ok=True)
     l=[
-        "accelerate", "launch", "run_clm_with_subsets_tfidf.py",
+        "accelerate", "launch", "run_clm_with_subsets_importance_sampling.py",
         "--preprocessed",
         "--log_dir", log_dir,
         "--subset_dir", subset_dir,
@@ -34,9 +34,10 @@ def main():
         "--selection_strategy", "fl",
         "--select_every", "25000",
         "--partition_strategy", "random",
-        "--num_partitions", "1000",
-        "--parallel_process", "96",
-        "--num_warmstart_epochs", "0",
+        "--layer_for_similarity_computation", "12",
+        "--num_partitions", "1500",
+        "--parallel_process", "48",
+        "--num_warmstart_epochs", "2",
         "--checkpointing_steps", "25000",
     ]
     with open(log_dir+"parameters.txt", "w") as f:
