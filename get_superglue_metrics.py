@@ -23,21 +23,38 @@ def main():
     args=parse_args()
     tasks=[
         # "cola", "mnli", "mrpc", "qnli", "qqp", "sst", "stsb", "wnli", "rte",
-        "boolq", "cb", "copa", "multirc", "wic", "wsc", #"record",
-        # "boolq",
+        # "boolq", "cb", "copa", "multirc", "wic", "wsc", "record",
+        "record",
     ]
     model_dir=args.model_dir
     for task in tasks:
-        for i in range(1, 21):
+        num_gpus=1
+        if task in ["boolq", "multirc", "wic"]:
+            train_batch_size=32
+            eval_batch_size=32
+            epochs=3
+            runs=5
+        elif task in ["cb", "copa", "wsc"]:
+            train_batch_size=16
+            eval_batch_size=16
+            epochs=5
+            runs=20
+        elif task=="record":
+            train_batch_size=64
+            eval_batch_size=64
+            epochs=3
+            runs=5
+            num_gpus=8
+        for i in range(1, runs+1):
             jiant_run_config = configurator.SimpleAPIMultiTaskConfigurator(
                 task_config_base_path="./tasks/configs",
                 task_cache_base_path="./cache",
                 train_task_name_list=[task],
                 val_task_name_list=[task],
-                train_batch_size=8,
-                eval_batch_size=8,
-                epochs=10,
-                num_gpus=8,
+                train_batch_size=train_batch_size,
+                eval_batch_size=eval_batch_size,
+                epochs=epochs,
+                num_gpus=num_gpus,
             ).create_config()
             os.makedirs(f"{model_dir}/superglue_run_{i}/run_configs/", exist_ok=True)
             py_io.write_json(jiant_run_config, f"{model_dir}/superglue_run_{i}/run_configs/{task}_run_config.json")
@@ -49,7 +66,7 @@ def main():
                 hf_pretrained_model_name_or_path=model_dir,
                 model_path=f"{model_dir}/pytorch_model.bin",
                 model_config_path=f"{model_dir}config.json",
-                learning_rate=1e-5,
+                learning_rate=5e-5,
                 adam_epsilon=1e-6,
                 eval_every_steps=500,
                 do_train=True,
