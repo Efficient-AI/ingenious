@@ -41,7 +41,7 @@ def main():
     tokenized_datasets=raw_datasets.map(
         tokenize_function,
         batched=True,
-        num_proc=96,
+        num_proc=12,
         remove_columns=column_names,
         desc="Running tokenizer on every text in dataset",
     )
@@ -157,7 +157,7 @@ def main():
         fn_kwargs={"split":"train"},
         batched=True,
         batch_size=1000,
-        num_proc=96,
+        num_proc=12,
         with_indices=True,
         desc=f"Grouping Train texts in chunks of {max_seq_length}",
     )
@@ -166,7 +166,7 @@ def main():
         fn_kwargs={"split":"validation"},
         batched=True,
         batch_size=1000,
-        num_proc=96,
+        num_proc=12,
         with_indices=True,
         desc=f"Grouping Validation texts in chunks of {max_seq_length}",
     )

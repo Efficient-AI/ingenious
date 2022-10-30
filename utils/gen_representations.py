@@ -15,7 +15,7 @@ def main():
     dataset=dataset.remove_columns(["special_tokens_mask","next_sentence_label"])
     dataset.set_format("torch")
     data_collator=DataCollatorWithPadding(tokenizer=tokenizer)
-    dataloader=DataLoader(dataset, collate_fn=data_collator, batch_size=256)
+    dataloader=DataLoader(dataset, collate_fn=data_collator, batch_size=128)
 
     model, dataloader=accelerator.prepare(model, dataloader)
 
@@ -25,7 +25,7 @@ def main():
     for step, batch in enumerate(dataloader):
         with torch.no_grad():
             outputs=model(**batch, output_hidden_states=True)
-        embeddings=outputs["hidden_states"][1]
+        embeddings=outputs["hidden_states"][9]
         mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
         mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
         mask=mask*mask1
@@ -38,7 +38,7 @@ def main():
     
     if accelerator.is_main_process:
         representations=torch.cat(representations, dim=0)
-        torch.save(representations, "./bert_representations_layer_1.pt")
+        torch.save(representations, "./bert_representations_layer_9.pt")
 
 if __name__=="__main__":
     main()

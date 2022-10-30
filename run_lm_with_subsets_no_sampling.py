@@ -26,7 +26,12 @@ from transformers import(
     get_scheduler
 )
 from transformers.utils.versions import require_version
+from cords.selectionstrategies.SL import SubmodStrategy
 from accelerate import InitProcessGroupKwargs
+from helper_fns import taylor_softmax_v1
+import numpy as np
+import faiss
+import pickle
 
 logger=get_logger(__name__)
 require_version("datasets>=1.8.0", "To fix: pip install -r requirements.txt")
@@ -37,12 +42,18 @@ def parse_args():
         "--log_dir",
         type=str,
         required=True,
-        help="The directory to which logs should be written"
+        help="The directory to which training logs should be written"
+    )
+    parser.add_argument(
+        "--subset_dir",
+        type=str,
+        required=True,
+        help="The directory to which information regarding selected subsets should be stored"
     )
     parser.add_argument(
         "--preprocessed",
         action="store_true",
-        help="If passed, already preprocessed data needs to be given"
+        help="If passed, already preprocessed data needs to be given and training will start right away"
     )
     parser.add_argument(
         "--load_data_from_disk",
@@ -53,7 +64,7 @@ def parse_args():
         "--data_directory",
         type=str,
         default=None,
-        help="The path to the directory in which dataset is present in the disk."
+        help="The path to the directory containing the dataset"
     )
     parser.add_argument(
         "--dataset_name",
@@ -118,7 +129,7 @@ def parse_args():
         "--vocab_size",
         type=int,
         default=30522,
-        help="The size of vocabulary in tokenizer"
+        help="The size of vocabulary used by the tokenizer"
     )
     parser.add_argument(
         "--use_slow_tokenizer",
@@ -153,7 +164,7 @@ def parse_args():
     parser.add_argument(
         "--max_train_steps",
         type=int,
-        default=1000000,
+        default=250000,
         help="Total number of training steps to perform. If provided, overrides num_train_epochs.",
     )
     parser.add_argument(
@@ -189,13 +200,13 @@ def parse_args():
     parser.add_argument(
         "--preprocessing_num_workers",
         type=int,
-        default=96,
+        default=None,
         help="The number of processes to use for the preprocessing.",
     )
     parser.add_argument(
         "--preprocess_batch_size",
         type=int,
-        default=2000,
+        default=None,
         help="batch size during preprocessing"
     )
     parser.add_argument(
@@ -211,10 +222,34 @@ def parse_args():
         "--nsp_probability", type=float, default=0.5, help="Fraction of incorrect sentence pairs in all of the input"
     )
     parser.add_argument(
+        "--subset_fraction", type=float, default=0.25, help="Fraction of the dataset that we want to use for training"
+    )
+    parser.add_argument(
+        "--selection_strategy", type=str, default='fl', help="Subset selection strategy"
+    )
+    parser.add_argument(
+        "--select_every", type=int, default=25000, help="Select a new subset for training every select_every training steps"
+    )
+    parser.add_argument(
+        "--partition_strategy", type=str, default="random", help="Partition strategy for subset selection"
+    )
+    parser.add_argument(
+        "--layer_for_similarity_computation", type=int, default=9, help="The hidden layer to use while calculating the similarities in submodular functions"
+    )
+    parser.add_argument(
+        "--num_partitions", type=int, default=5000, help="Number of partitions in subset selection"
+    )
+    parser.add_argument(
+        "--parallel_processes", type=int, default=96, help="Number of parallel processes for subset selection"
+    )
+    parser.add_argument(
+        "--num_warmstart_epochs", type=int, default=0, help="Number of epochs to run in the warmstart stage"
+    )
+    parser.add_argument(
         "--checkpointing_steps",
         type=str,
-        default=50000,
-        help="Whether various states should be saved at the end of every n steps, or 'epoch' for each epoch.",
+        default=None,
+        help="Whether various states should be saved at the end of every n steps",
     )
     parser.add_argument(
         "--resume_from_checkpoint",
@@ -222,16 +257,19 @@ def parse_args():
         default=None,
         help="If the training should continue from a checkpoint folder",
     )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=1.0,
+        help="temperature while calculating taylor softmax"
+    )
     args=parser.parse_args()
-
     return args
-
 
 def main():
     args=parse_args()
     init_process_group=InitProcessGroupKwargs(timeout=datetime.timedelta(seconds=75000))
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
-    # If we're using tracking, we also need to initialize it here and it will pick up all supported trackers in the environment
     accelerator=Accelerator(kwargs_handlers=[init_process_group])
     # Make one log on every process with the configuration for debugging
     logging.basicConfig(
@@ -291,7 +329,7 @@ def main():
     #
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
-    logger.info("Loading the model configuration.")
+    logger.info(f"Loading the model configuration.")
     if args.config_name:
         config=BertConfig.from_pretrained(args.config_name)
     elif args.model_name_or_path:
@@ -312,7 +350,8 @@ def main():
             layer_norm_eps=1e-12,
             position_embedding_type="absolute",
         )
-    logger.info("Loading the tokenizer.")
+
+    logger.info(f"Loading the tokenizer.")
     if args.tokenizer_name:
         tokenizer=BertTokenizerFast.from_pretrained(args.tokenizer_name, use_fast=not args.use_slow_tokenizer)
     elif args.model_name_or_path:
@@ -322,7 +361,7 @@ def main():
             "You are instantiating a new tokenizer from scratch. This is not supported by this script."
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
-    logger.info("Initializing Model.")
+    logger.info(f"Initializing Model.")
     if args.model_name_or_path:
         model=BertForPreTraining.from_pretrained(
             args.model_name_or_path,
@@ -330,11 +369,10 @@ def main():
             config=config
         )
     else:
-        logger.info("Training new model from scratch")
+        logger.info("Training a new model from scratch")
         model=BertForPreTraining(config)
 
     model.resize_token_embeddings(len(tokenizer))
-
     #Preprocessing the datasets
     #First we tokenize all the texts
     if not args.preprocessed:
@@ -359,9 +397,8 @@ def main():
                 f"model ({tokenizer.model_max_length}). Using max_seq_length={tokenizer.model_max_length}."
             )
         max_seq_length=min(args.max_seq_length, tokenizer.model_max_length)
-    
     if not args.preprocessed:
-        logger.info("Beginning Tokenization.")
+        logger.info(f"Beginning Tokenization.")
         if args.line_by_line:
             #when using line_by_line, we just tokenize each non-empty line.
             padding="max_length" if args.pad_to_max_length else False
@@ -532,7 +569,7 @@ def main():
                     num_proc=args.preprocessing_num_workers,
                     load_from_cache_file=not args.overwrite_cache,
                     with_indices=True,
-                    desc=f"Grouping texts in chunks of {max_seq_length}",
+                    desc=f"Grouping Train texts in chunks of {max_seq_length}",
                 )
             with accelerator.main_process_first():
                 eval_dataset=eval_dataset.map(
@@ -543,13 +580,25 @@ def main():
                     num_proc=args.preprocessing_num_workers,
                     load_from_cache_file=not args.overwrite_cache,
                     with_indices=True,
-                    desc=f"Grouping texts in chunks of {max_seq_length}",
+                    desc=f"Grouping Validation texts in chunks of {max_seq_length}",
                 )
     else:
         dataset=load_from_disk(args.data_directory)
         train_dataset=dataset["train"]
         eval_dataset=dataset["validation"]
-    
+
+    #Initial Random Subset Selection 
+    if accelerator.is_main_process:
+        num_samples = int(round(len(train_dataset) * args.subset_fraction, 0))
+        init_subset_indices = [random.sample(list(range(len(train_dataset))), num_samples)]
+    else:
+        init_subset_indices = [[]]
+    accelerator.wait_for_everyone()
+    broadcast_object_list(init_subset_indices)
+    full_dataset=train_dataset
+    subset_dataset = full_dataset.select(init_subset_indices[0])
+
+    logger.info(f"Full data has {len(full_dataset)} samples, subset data has {len(subset_dataset)} samples.")
     # Conditional for small test subsets
     if len(train_dataset)>3:
         # Log a few random samples from the training data
@@ -561,9 +610,18 @@ def main():
     data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm_probability=args.mlm_probability)
 
     # Dataloaders creation
-    train_dataloader=DataLoader(
+    warmstart_dataloader=DataLoader(
         train_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
     )
+
+    full_dataloader=DataLoader(
+        train_dataset, shuffle=False, collate_fn=data_collator, batch_size=args.per_device_eval_batch_size
+    )
+
+    subset_dataloader=DataLoader(
+        subset_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size
+    )
+
     eval_dataloader=DataLoader(
         eval_dataset, collate_fn=data_collator, batch_size=args.per_device_eval_batch_size
     )
@@ -581,15 +639,13 @@ def main():
             "weight_decay": 0.0
         }
     ]
+
     optimizer=AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
 
     # On TPU, the tie weights in our model have been disconnected, so we need to restore the ties.
     if accelerator.distributed_type==DistributedType.TPU:
         model.tie_weights()
-
-    # Note -> the training dataloader needs to be prepared before we grab his length below (because its length will be 
-    # shorter in multiprocess)
-
+    
     lr_scheduler=get_scheduler(
         name=args.lr_scheduler_type,
         optimizer=optimizer,
@@ -597,12 +653,18 @@ def main():
         num_training_steps=args.lr_max_steps,
     )
 
-    logger.info("Prepare model, optimizer, train_dataloader, eval_dataloader with accelerate.")
+    logger.info(f"Prepare model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader with accelerate.")
     # Prepare everything with our `accelerator`
-    model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
-        model, optimizer, train_dataloader, eval_dataloader
-    )
-
+    model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader = accelerator.prepare(
+        model, optimizer, warmstart_dataloader, full_dataloader, subset_dataloader, eval_dataloader)
+    
+    if args.selection_strategy in ['fl', 'logdet', 'gc']:
+        subset_strategy = SubmodStrategy(logger, args.selection_strategy,
+                                    num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
+                                    optimizer='LazierThanLazyGreedy', similarity_criterion='feature', 
+                                    metric='cosine', eta=1, stopIfZeroGain=False, 
+                                    stopIfNegativeGain=False, verbose=False, lambdaVal=1)
+    
     # Figure out how many steps we should save the Accelerator states
     if hasattr(args.checkpointing_steps, "isdigit"):
         checkpointing_steps=args.checkpointing_steps
@@ -610,12 +672,13 @@ def main():
             checkpointing_steps=int(args.checkpointing_steps)
     else:
         checkpointing_steps=None
-
+    
     # Train!
     total_batch_size=args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
+    logger.info(f"  Num warm-start epochs = {args.num_warmstart_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
@@ -629,30 +692,197 @@ def main():
         accelerator.load_state(args.resume_from_checkpoint)
 
     logger.info(f"Begin the training.")
-    while completed_steps<args.max_train_steps:
+    timing = []
+    for epoch in range(args.num_warmstart_epochs):
+        if epoch==0:
+            logger.info("Begin the warm-start")
         model.train()
-        for step, batch in enumerate(train_dataloader):
+        for step, batch in enumerate(warmstart_dataloader):
+            start_time=time.time()
             outputs=model(**batch)
             loss=outputs.loss
-            logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}; lr: {lr_scheduler.get_last_lr()}")
+            # if (1+completed_steps)%10==0:
+            logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}; lr: {lr_scheduler.get_last_lr()};")
             loss=loss/args.gradient_accumulation_steps
             accelerator.backward(loss)
-            if step%args.gradient_accumulation_steps==0 or step==len(train_dataloader)-1:
+            if step%args.gradient_accumulation_steps==0 or step==len(warmstart_dataloader)-1:
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
                 progress_bar.update(1)
                 completed_steps+=1
-            
             if isinstance(checkpointing_steps, int):
                 if completed_steps%checkpointing_steps==0:
                     output_dir=f"step_{completed_steps }"
                     if args.output_dir is not None:
                         output_dir=os.path.join(args.output_dir, output_dir)
                     accelerator.save_state(output_dir)
-            
             if completed_steps>=args.max_train_steps:
                 break
+            timing.append([(time.time() - start_time), 0])
+        
+        model.eval()
+        losses=[]
+        for step, batch in enumerate(eval_dataloader):
+            with torch.no_grad():
+                outputs=model(**batch)
+
+            loss=outputs.loss
+            losses.append(accelerator.gather(loss.repeat(args.per_device_eval_batch_size)))
+
+        losses=torch.cat(losses)
+        losses=losses[:len(eval_dataset)]
+        try:
+            perplexity=math.exp(torch.mean(losses))
+        except OverflowError:
+            perplexity=float("inf")
+
+        logger.info(f"Steps {completed_steps}: perplexity: {perplexity}")
+        if epoch==args.num_warmstart_epochs-1:
+            logger.info("End the warm-start")
+    # probs=[]
+    # greedyList=[]
+    # gains=[]
+    if (args.num_warmstart_epochs>=0) or (args.resume_from_checkpoint):
+        start_time = time.time()
+        if args.selection_strategy == 'Random-Online':
+            if accelerator.is_main_process:
+                init_subset_indices = [random.sample(list(range(len(full_dataset))), num_samples)]
+            else:
+                init_subset_indices = [[]]
+        elif args.selection_strategy in ["fl", "logdet", "gc"]:
+            pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
+            model.eval()
+            representations = []
+            batch_indices = []
+            total_cnt = 0
+            total_storage = 0
+
+            for step, batch in enumerate(full_dataloader):
+                with torch.no_grad():
+                    output=model(**batch, output_hidden_states=True)
+                embeddings=output['hidden_states'][args.layer_for_similarity_computation]
+                mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
+                mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
+                mask=mask*mask1
+                mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
+                mean_pooled = accelerator.gather(mean_pooled)
+                total_cnt += mean_pooled.size(0)
+                if accelerator.is_main_process:
+                    mean_pooled = mean_pooled.cpu()
+                    total_storage += sys.getsizeof(mean_pooled.storage())
+                    representations.append(mean_pooled)
+                pbar.update(1)
+            if accelerator.is_main_process:
+                # representations = torch.from_numpy(faiss.rand((41543418, 768)))
+                representations=torch.cat(representations, dim = 0)
+                representations = representations[:len(full_dataset)]
+                total_storage += sys.getsizeof(representations.storage())
+                representations = representations.numpy()
+                logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
+                batch_indices=list(range(len(full_dataset)))
+                logger.info('Length of indices: {}'.format(len(batch_indices)))
+                logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
+            if accelerator.is_main_process:
+                num_samples = int(round(len(train_dataset) * args.subset_fraction, 0))
+                partition_indices, greedyIdx = subset_strategy.select(num_samples, batch_indices, representations, parallel_processes=args.parallel_processes)
+                init_subset_indices=[greedyIdx]
+                # i=0
+                # for p in gains:
+                #     greedyList.append(greedyIdx[i:i+len(p)])
+                #     i+=len(p)
+                # probs=[taylor_softmax_v1(torch.from_numpy(np.array([partition_gains])/args.temperature)).numpy()[0] for partition_gains in gains]
+                # for i, partition_prob in enumerate(probs):
+                #     rng=np.random.default_rng(int(time.time()))
+                #     partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
+                #     init_subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
+            else:
+                init_subset_indices = [[]]
+        accelerator.wait_for_everyone()
+        broadcast_object_list(init_subset_indices)
+        timing.append([0, (time.time() - start_time)])
+    if accelerator.is_main_process:
+        output_file=f"subset_indices_after_step_{completed_steps}.pt"
+        output_file=os.path.join(args.subset_dir, output_file)
+        torch.save(torch.tensor(init_subset_indices[0]), output_file)
+        # output_file=f"gains_after_step_{completed_steps}.pkl"
+        # output_file=os.path.join(args.subset_dir, output_file)
+        # with open(output_file, "wb") as f:
+        #     pickle.dump(gains, f)
+        output_file=f"partition_indices_after_step_{completed_steps}.pkl"
+        output_file=os.path.join(args.subset_dir, output_file)
+        with open(output_file, "wb") as f:
+            pickle.dump(partition_indices, f)
+    accelerator.wait_for_everyone()
+    subset_dataset = full_dataset.select(init_subset_indices[0])
+    subset_dataloader=DataLoader(
+        subset_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size)
+    subset_dataloader = accelerator.prepare(subset_dataloader)
+    
+    logger.info("Begin training along with subset selection")
+    while completed_steps<args.max_train_steps:
+        model.train()
+        for step, batch in enumerate(subset_dataloader):
+            train_time = 0
+            subset_time = 0
+            start_time = time.time()
+            outputs=model(**batch)
+            loss=outputs.loss
+            logger.info(f"Completed Steps: {1+completed_steps}; Loss: {loss.detach().float()}; lr: {lr_scheduler.get_last_lr()};")
+            loss=loss/args.gradient_accumulation_steps
+            accelerator.backward(loss)
+            if step%args.gradient_accumulation_steps==0 or step==len(subset_dataloader)-1:
+                optimizer.step()
+                lr_scheduler.step()
+                optimizer.zero_grad()
+                progress_bar.update(1)
+                completed_steps+=1
+            train_time += (time.time() - start_time)
+
+            if isinstance(checkpointing_steps, int):
+                if completed_steps%checkpointing_steps==0:
+                    output_dir=f"step_{completed_steps }"
+                    if args.output_dir is not None:
+                        output_dir=os.path.join(args.output_dir, output_dir)
+                    accelerator.save_state(output_dir)
+
+            if completed_steps>=args.max_train_steps:
+                break
+
+            # if (completed_steps)%args.select_every==0:
+            #     accelerator.wait_for_everyone()
+            #     start_time = time.time()
+            #     num_samples = int(round(len(full_dataset) * args.subset_fraction, 0)) 
+            #     if args.selection_strategy == 'Random-Online':
+            #         if accelerator.is_main_process:
+            #             init_subset_indices = [random.sample(list(range(len(full_dataset))), num_samples)]
+            #         else:
+            #             init_subset_indices = [[]]
+            #     elif args.selection_strategy in ["fl", "logdet", "gc"]:
+            #         if accelerator.is_main_process:
+            #             init_subset_indices = [[]]
+            #             for i, partition_prob in enumerate(probs):
+            #                 rng=np.random.default_rng(int(time.time()))
+            #                 partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
+            #                 init_subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
+            #         else:
+            #             init_subset_indices = [[]]
+
+            #     accelerator.wait_for_everyone()
+            #     broadcast_object_list(init_subset_indices)
+            #     if accelerator.is_main_process:
+            #         output_file=f"subset_indices_after_step_{completed_steps}.pt"
+            #         output_file=os.path.join(args.subset_dir, output_file)
+            #         torch.save(torch.tensor(init_subset_indices[0]), output_file)
+            #     accelerator.wait_for_everyone()
+            #     subset_dataset = full_dataset.select(init_subset_indices[0])
+            #     subset_dataloader=DataLoader(
+            #         subset_dataset, shuffle=True, collate_fn=data_collator, batch_size=args.per_device_train_batch_size)
+            #     subset_dataloader = accelerator.prepare(subset_dataloader)
+            #     subset_time = (time.time() - start_time)
+            #     timing.append([train_time, subset_time])
+            #     break
+            timing.append([train_time, subset_time])
 
         model.eval()
         losses=[]
@@ -669,9 +899,10 @@ def main():
             perplexity=math.exp(torch.mean(losses))
         except OverflowError:
             perplexity=float("inf")
-        
-        logger.info(f"Steps {completed_steps}: perplexity: {perplexity}")
 
+        logger.info(f"Steps {completed_steps}: perplexity: {perplexity}")
+        
+    logger.info(f"Timing: {timing}")
     logger.info(f"Saving the final model after {completed_steps} steps.")
     if args.output_dir is not None:
         accelerator.wait_for_everyone()

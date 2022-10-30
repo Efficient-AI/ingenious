@@ -19,10 +19,11 @@ def partition_subset_strat(args):
 def partition_subset_selection(representations, partition_budget, partition_ind, smi_func_type, metric, sparse_rep, return_gains):
     kernel_time=time.time()
     if smi_func_type in ["fl", "logdet", "gc"]:
-        if sparse_rep:
-            data_sijs=cosine_similarity(representations)
-        else:
-            data_sijs=submodlib.helper.create_kernel(X=representations, metric=metric, method="sklearn")
+        data_sijs=submodlib.helper.create_kernel(X=representations, metric=metric, method="sklearn")
+        # if sparse_rep:
+        #     data_sijs=cosine_similarity(representations)
+        # else:
+        #     data_sijs=submodlib.helper.create_kernel(X=representations, metric=metric, method="sklearn")
     else:
         raise Exception(f"{smi_func_type} not yet supported by this script")
     

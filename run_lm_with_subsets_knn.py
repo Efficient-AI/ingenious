@@ -28,9 +28,9 @@ from transformers import(
 from transformers.utils.versions import require_version
 from cords.selectionstrategies.SL import KnnSubmodStrategy
 from accelerate import InitProcessGroupKwargs
+import numpy as np
+import pickle
 import faiss
-
-# from .cords.selectionstrategies.SL.knn_smistrategy import KnnSubmodStrategy
 sys.path.insert(0, "./pysubmodlib/")
 
 logger=get_logger(__name__)
@@ -249,12 +249,18 @@ def parse_args():
         help="If the training should continue from a checkpoint folder",
     )
     parser.add_argument(
+        "--init_subset",
+        type=str,
+        default=None,
+        help="If the training should continue from a checkpoint, specify the initial subset to use"
+    )
+    parser.add_argument(
         "--exploration_prob",
         type=float,
         default=0.15,
         help="probability of exploration",
     )
-    parser.add_argument("--knn_index_key", type=str, default=None, help="index type", required=True)
+    parser.add_argument("--knn_index_key", type=str, default=None, help="index type")#, required=True)
     parser.add_argument("--knn_ngpu", type=int, default=-1, help="number of GPUs to use (default=all)")
     parser.add_argument("--knn_tempmem", type=int, default=-1,help="use N bytes of temporary GPU memory")
     parser.add_argument("--knn_altadd", action="store_true", help="Alternative add function, where the index is not stored on GPU during add. Slightly faster for big datasets on slow GPUs")
@@ -754,58 +760,75 @@ def main():
             else:
                 init_subset_indices = [[]]
         elif args.selection_strategy in ["fl", "logdet", "gc"]:
-            pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
-            model.eval()
-            representations = []
-            batch_indices = []
-            total_cnt = 0
-            total_storage = 0
-
-            for step, batch in enumerate(full_dataloader):
-                with torch.no_grad():
-                    output=model(**batch, output_hidden_states=True)
-                embeddings=output['hidden_states'][args.layer_for_similarity_computation]
-                mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
-                mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
-                mask=mask*mask1
-                mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
-                mean_pooled = accelerator.gather(mean_pooled)
-                total_cnt += mean_pooled.size(0)
+            if args.resume_from_checkpoint and args.init_subset:
                 if accelerator.is_main_process:
-                    mean_pooled = mean_pooled.cpu()
-                    total_storage += sys.getsizeof(mean_pooled.storage())
-                    representations.append(mean_pooled)
-                pbar.update(1)
-            if accelerator.is_main_process:
-                representations=torch.cat(representations, dim = 0)
-                representations = representations[:len(full_dataset)]
-                total_storage += sys.getsizeof(representations.storage())
-                representations = representations.numpy()
-                faiss.normalize_L2(representations)
-                logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
-                batch_indices=list(range(len(full_dataset)))
-                logger.info('Length of indices: {}'.format(len(batch_indices)))
-                logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
-            if accelerator.is_main_process:
-                subset_strategy.compute_sparse_kernel(representations, index_key=args.knn_index_key, ngpu=args.knn_ngpu, tempmem=args.knn_tempmem, altadd=args.knn_altadd, use_float16=args.knn_use_float16, use_precomputed_tables=not args.knn_noptables, replicas=args.knn_R, max_add=args.knn_max_add, add_batch_size=args.knn_abs, query_batch_size=args.knn_qbs, nprobe=args.knn_nprobe, nnn=args.knn_nnn)
-                del representations
-                greedyList = [subset_strategy.select(num_samples, nnn=args.knn_nnn)]
-                init_subset_indices=[[]]
-                greedyList=set(greedyList[0])
-                remaining_idx=[i for i in range(len(full_dataset)) if i not in greedyList]
-                random.shuffle(remaining_idx)
-                # ptr=0
-                for idx in greedyList:
-                    # if args.resume_from_checkpoint:
-                    #     if random.random()<args.exploration_prob:
-                    #         init_subset_indices[0].append(remaining_idx[ptr])
-                    #         ptr+=1
-                    #     else:
-                    #         init_subset_indices[0].append(idx)
-                    # else:
-                    init_subset_indices[0].append(idx)
+                    greedyList=torch.load(args.init_subset).tolist()
+                    init_subset_indices=[[]]
+                    greedyList=set(greedyList)
+                    remaining_idx=[i for i in range(len(full_dataset)) if i not in greedyList]
+                    random.shuffle(remaining_idx)
+                    ptr=0
+                    for idx in greedyList:
+                        if random.random()<args.exploration_prob:
+                            init_subset_indices[0].append(remaining_idx[ptr])
+                            ptr+=1
+                        else:
+                            init_subset_indices[0].append(idx)
+                else:
+                    init_subset_indices=[[]]
             else:
-                init_subset_indices = [[]]
+                pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
+                model.eval()
+                representations = []
+                batch_indices = []
+                total_cnt = 0
+                total_storage = 0
+
+                for step, batch in enumerate(full_dataloader):
+                    with torch.no_grad():
+                        output=model(**batch, output_hidden_states=True)
+                    embeddings=output['hidden_states'][args.layer_for_similarity_computation]
+                    mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
+                    mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
+                    mask=mask*mask1
+                    mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
+                    mean_pooled = accelerator.gather(mean_pooled)
+                    total_cnt += mean_pooled.size(0)
+                    if accelerator.is_main_process:
+                        mean_pooled = mean_pooled.cpu()
+                        total_storage += sys.getsizeof(mean_pooled.storage())
+                        representations.append(mean_pooled)
+                    pbar.update(1)
+                if accelerator.is_main_process:
+                    representations=torch.cat(representations, dim = 0)
+                    representations = representations[:len(full_dataset)]
+                    total_storage += sys.getsizeof(representations.storage())
+                    representations = representations.numpy()
+                    faiss.normalize_L2(representations)
+                    logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
+                    batch_indices=list(range(len(full_dataset)))
+                    logger.info('Length of indices: {}'.format(len(batch_indices)))
+                    logger.info('Representations gathered. Shape of representations: {}. Length of indices: {}'.format(representations.shape, len(batch_indices)))
+                if accelerator.is_main_process:
+                    subset_strategy.compute_sparse_kernel(representations, index_key=args.knn_index_key, ngpu=args.knn_ngpu, tempmem=args.knn_tempmem, altadd=args.knn_altadd, use_float16=args.knn_use_float16, use_precomputed_tables=not args.knn_noptables, replicas=args.knn_R, max_add=args.knn_max_add, add_batch_size=args.knn_abs, query_batch_size=args.knn_qbs, nprobe=args.knn_nprobe, nnn=args.knn_nnn)
+                    del representations
+                    greedyList = [subset_strategy.select(num_samples, nnn=args.knn_nnn)]
+                    init_subset_indices=[[]]
+                    greedyList=set(greedyList[0])
+                    remaining_idx=[i for i in range(len(full_dataset)) if i not in greedyList]
+                    random.shuffle(remaining_idx)
+                    # ptr=0
+                    for idx in greedyList:
+                        # if args.resume_from_checkpoint:
+                        #     if random.random()<args.exploration_prob:
+                        #         init_subset_indices[0].append(remaining_idx[ptr])
+                        #         ptr+=1
+                        #     else:
+                        #         init_subset_indices[0].append(idx)
+                        # else:
+                        init_subset_indices[0].append(idx)
+                else:
+                    init_subset_indices = [[]]
         accelerator.wait_for_everyone()
         broadcast_object_list(init_subset_indices)
         timing.append([0, (time.time() - start_time)])

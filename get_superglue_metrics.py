@@ -16,6 +16,17 @@ def parse_args():
         required=True,
         help="Path to pytorch saved model"
     )
+    parser.add_argument(
+        "--visible_gpus",
+        type=str,
+        required=True,
+        help="gpu number to use"
+    )
+    parser.add_argument(
+        "--do_save",
+        action="store_true",
+        help="save the finetuned models"
+    )
     args=parser.parse_args()
     return args
 
@@ -23,11 +34,11 @@ def main():
     args=parse_args()
     tasks=[
         # "cola", "mnli", "mrpc", "qnli", "qqp", "sst", "stsb", "wnli", "rte",
-        # "boolq", "cb", "copa", "multirc", "wic", "wsc", "record",
-        "record",
+        "boolq", "cb", "copa", "multirc", "wic", "wsc"#, "record",
     ]
     model_dir=args.model_dir
     for task in tasks:
+        os.environ["CUDA_VISIBLE_DEVICES"]=args.visible_gpus
         num_gpus=1
         if task in ["boolq", "multirc", "wic"]:
             train_batch_size=32
@@ -71,7 +82,7 @@ def main():
                 eval_every_steps=500,
                 do_train=True,
                 do_val=True,
-                do_save=True,
+                do_save=args.do_save,
                 force_overwrite=True,
             )
             main_runscript.run_loop(run_args)

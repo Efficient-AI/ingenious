@@ -576,6 +576,7 @@ def main():
     probs=[]
     greedyList=[]
     gains=[]
+    partition_indices=[]
     if (args.num_warmstart_epochs>0) or (args.resume_from_checkpoint):
         start_time = time.time()
         if args.selection_strategy == 'Random-Online':
