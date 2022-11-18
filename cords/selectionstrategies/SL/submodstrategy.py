@@ -2,32 +2,23 @@ import math
 import random
 import time
 from multiprocessing import Pool
-# from pathos.multiprocessing import ProcessingPool
 import tqdm
-from sklearn.metrics.pairwise import cosine_similarity
 import submodlib
 import faiss
-import pickle
 
-def query_generator(representations, partition_indices, partition_budgets, smi_func_type, metric, sparse_rep, return_gains):
+def query_generator(representations, partition_indices, partition_budgets, smi_func_type, optimizer, metric, sparse_rep, return_gains):
     for i, partition in enumerate(partition_indices):
-        yield (representations[partition], partition_budgets[i], partition, smi_func_type, metric, sparse_rep, return_gains)
+        yield (representations[partition], partition_budgets[i], partition, smi_func_type, optimizer, metric, sparse_rep, return_gains)
 
 def partition_subset_strat(args):
         return partition_subset_selection(*args)
     
-def partition_subset_selection(representations, partition_budget, partition_ind, smi_func_type, metric, sparse_rep, return_gains):
-    kernel_time=time.time()
+def partition_subset_selection(representations, partition_budget, partition_ind, smi_func_type, optimizer, metric, sparse_rep, return_gains):
     if smi_func_type in ["fl", "logdet", "gc"]:
         data_sijs=submodlib.helper.create_kernel(X=representations, metric=metric, method="sklearn")
-        # if sparse_rep:
-        #     data_sijs=cosine_similarity(representations)
-        # else:
-        #     data_sijs=submodlib.helper.create_kernel(X=representations, metric=metric, method="sklearn")
     else:
         raise Exception(f"{smi_func_type} not yet supported by this script")
     
-    greedy_selection_start_time=time.time()
     if smi_func_type=="fl":
         obj = submodlib.FacilityLocationFunction(n = representations.shape[0],
                                                 separate_rep=False,
@@ -38,14 +29,14 @@ def partition_subset_selection(representations, partition_budget, partition_ind,
                                         mode = 'dense',
                                         lambdaVal = 1,
                                         separate_rep=False,
-                                        ggsijs = data_sijs)     
+                                        ggsijs = data_sijs)
     if smi_func_type == 'logdet':
         obj = submodlib.LogDeterminantFunction(n = representations.shape[0],
                                                 mode = 'dense',
                                                 lambdaVal = 1,
                                                 sijs = data_sijs)
     
-    greedyList=obj.maximize(budget=partition_budget, optimizer="LazierThanLazyGreedy", stopIfZeroGain=False, stopIfNegativeGain=False, verbose=False, show_progress=True)
+    greedyList=obj.maximize(budget=partition_budget, optimizer=optimizer, stopIfZeroGain=False, stopIfNegativeGain=False, verbose=False, show_progress=True)
 
     del representations
     del obj
@@ -59,8 +50,8 @@ def partition_subset_selection(representations, partition_budget, partition_ind,
 
 class SubmodStrategy():
     def __init__(self, logger, smi_func_type, 
-                num_partitions=1000, partition_strategy="random",
-                optimizer="LazierThanLazyGreedy", similarity_criterion="feature",
+                num_partitions=5000, partition_strategy="random",
+                optimizer="LazyGreedy", similarity_criterion="feature",
                 metric="cosine", eta=1, stopIfZeroGain=False,
                 stopIfNegativeGain=False, verbose=False, lambdaVal=1, sparse_rep=False):
         self.logger=logger
@@ -92,7 +83,6 @@ class SubmodStrategy():
         n=representations.shape[0]
         d=representations.shape[1]
         kmeans=faiss.Kmeans(d, num_partitions, spherical=True, max_points_per_centroid=math.ceil(n/num_partitions), niter=20, verbose=True, gpu=True)
-        # kmeans=faiss.Kmeans(d, num_partitions, spherical=True, niter=20, nredo=5, verbose=True, gpu=True)
         self.logger.info("Starting training")
         kmeans.train(representations)
         D, I=kmeans.index.search(representations, 1)
@@ -102,8 +92,7 @@ class SubmodStrategy():
         kmeans_end_time=time.time()
         self.logger.info("Kmeans routine took %.4f of time", kmeans_end_time-kmeans_start_time)
         del kmeans
-        pickle.dump(partition_indices, open("partitions.pkl", "wb"))
-        # partition_indices=pickle.load(open("/home/sumbhati/ingenious/LM-pretraining/partitions.pkl", "rb"))
+        # pickle.dump(partition_indices, open("partitions.pkl", "wb"))
         return partition_indices
     
     def select(self, budget, indices, representations, parallel_processes=96, return_gains=False):
@@ -128,7 +117,7 @@ class SubmodStrategy():
         # Parallel computation of subsets
         with Pool(parallel_processes) as pool:
             greedyIdx_list=list(tqdm.tqdm(pool.imap_unordered(partition_subset_strat, 
-                                                    query_generator(representations, partition_indices, partition_budgets, self.smi_func_type, self.metric, self.sparse_rep, return_gains)), total=len(partition_indices)))
+                                                    query_generator(representations, partition_indices, partition_budgets, self.smi_func_type, self.optimizer, self.metric, self.sparse_rep, return_gains)), total=len(partition_indices)))
         
         if return_gains:
             gains=[p[1] for p in greedyIdx_list]
