@@ -7,6 +7,7 @@
 # 5. GO TO 2
 ####################################################################################
 import argparse
+import math
 import datetime
 import time
 import logging
@@ -31,6 +32,8 @@ from transformers.utils.versions import require_version
 from cords.selectionstrategies.SL import SubmodStrategy
 import pickle
 from accelerate import InitProcessGroupKwargs
+from helper_fns import taylor_softmax_v1
+import numpy as np
 import faiss
 
 logger=get_logger(__name__)
@@ -67,12 +70,6 @@ def parse_args():
         type=str,
         required=True,
         help="Path to the pre-trained model checkpoint"
-    )
-    parser.add_argument(
-        "--tokenizer_name",
-        type=str,
-        default=None,
-        help="Pretrained tokenizer name or path if not the same as model_name",
     )
     parser.add_argument(
         "--per_device_batch_size",
@@ -153,12 +150,10 @@ def main():
     dataset=load_from_disk(args.data_directory)
 
     logger.info(f"loading the model configuration.")
-    if args.config_name:
-        config=BertConfig.from_pretrained("bert-base-uncased")
+    config=BertConfig.from_pretrained("bert-base-uncased")
     
     logger.info(f"Loading the tokenizer.")
-    if args.tokenizer_name:
-        tokenizer=BertTokenizerFast.from_pretrained("bert-base-uncased")
+    tokenizer=BertTokenizerFast.from_pretrained("bert-base-uncased")
 
     logger.info(f"Loading Model")
     # model=BertModel(config)
@@ -223,7 +218,20 @@ def main():
             logger.info("Length of indices: {}".format(len(batch_indices)))
             logger.info("Representations gathered. Shape of representations: {}. Length of indices: {}".format(representations.shape, len(batch_indices)))
         if accelerator.is_main_process:
-            partition_indices, greedyIdxs=subset_strategy.select(num_samples, batch_indices, representations, parallel_processes=args.parallel_processes)
+            partition_indices, greedyIdx, gains = subset_strategy.select(len(batch_indices)-1, batch_indices, representations, parallel_processes=args.parallel_processes, return_gains=True)
+            probs=[]
+            greedyList=[]
+            gains=[]
+            subset_indices=[[]]
+            i=0
+            for p in gains:
+                greedyList.append(greedyIdx[i:i+len(p)])
+                i+=len(p)
+            probs=[taylor_softmax_v1(torch.from_numpy(np.array([partition_gains])/args.temperature)).numpy()[0] for partition_gains in gains]
+            for i, partition_prob in enumerate(probs):
+                rng=np.random.default_rng(int(time.time()))
+                partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
+                subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
             now=datetime.now()
             timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
             output_file=f"partition_indices_{timestamp}.pkl"
@@ -232,7 +240,11 @@ def main():
                 pickle.dump(partition_indices, f)
             output_file=f"subset_indices_{timestamp}.pt"
             output_file=os.path.join(args.subset_dir, output_file)
-            torch.save(torch.tensor(greedyIdxs), output_file)
+            torch.save(torch.tensor(subset_indices[0]), output_file)
+            output_file=f"gains_{timestamp}.pkl"
+            output_file=os.path.join(args.subset_dir, output_file)
+            with open(output_file, "wb") as f:
+                pickle.dump(gains, f)
         accelerator.wait_for_everyone()
         time_now=time.time()
         if time_now-program_start_time>=args.stop_after:

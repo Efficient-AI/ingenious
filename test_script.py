@@ -37,7 +37,6 @@ def main():
         "--partitions_dir", partitions_dir,
         "--data_directory", "bert_dataset_prepared",
         "--model_checkpoint_dir", "models/huggingface_bert",
-        "--tokenizer_name", "bert-base-uncased",
         "--per_device_batch_size", "128",
         "--subset_fraction", "0.25",
         "--selection_strategy", "fl",
