@@ -90,6 +90,12 @@ def parse_args():
         help="Subset Selection strategy"
     )
     parser.add_argument(
+        "--partition_strategy",
+        type=str,
+        default="random",
+        help="Partition strategy"
+    )
+    parser.add_argument(
         "--layer_for_embeddings",
         type=int,
         default=9,
@@ -114,7 +120,7 @@ def parse_args():
         help="Optimizer to use for submodular optimization"
     )
     parser.add_argument(
-        "stop_after",
+        "--stop_after",
         type=int,
         default=350000,
         help="Stop this program after how many seconds"
@@ -143,9 +149,6 @@ def main():
         datasets.utils.logging.set_verbosity_error()
         transformers.utils.logging.set_verbosity_error()
 
-    if args.seed is not None:
-        set_seed(args.seed)
-
     logger.info("Loading the dataset")
     dataset=load_from_disk(args.data_directory)
 
@@ -162,6 +165,7 @@ def main():
     model.resize_token_embeddings(len(tokenizer))
 
     train_dataset=dataset["train"]
+    train_dataset=train_dataset.remove_columns(["special_tokens_mask", "next_sentence_label"])
 
     num_samples=int(round(len(train_dataset)*args.subset_fraction, 0))
 
@@ -232,7 +236,7 @@ def main():
                 rng=np.random.default_rng(int(time.time()))
                 partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
                 subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
-            now=datetime.now()
+            now=time.now()
             timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
             output_file=f"partition_indices_{timestamp}.pkl"
             output_file=os.path.join(args.partitions_dir, output_file)
@@ -250,3 +254,6 @@ def main():
         if time_now-program_start_time>=args.stop_after:
             break
         break
+
+if __name__=="__main__":
+    main()
