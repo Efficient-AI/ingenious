@@ -1,10 +1,9 @@
 ####################################################################################
-# At a high level, this program does the following:
+# This program does the following:
 # 1. Load in the processed dataset(tokenized and chunked)
 # 2. Read in the model weights from the checkpoint folder mentioned(to be taken as argument)
 # 3. Compute the sentence embeddings of specified layer using these model weights
 # 4. Perform subset selection, save the subset to the folder mentioned(to be taken as argument)
-# 5. GO TO 2
 ####################################################################################
 import argparse
 import math
@@ -119,12 +118,6 @@ def parse_args():
         default="LazyGreedy",
         help="Optimizer to use for submodular optimization"
     )
-    parser.add_argument(
-        "--stop_after",
-        type=int,
-        default=350000,
-        help="Stop this program after how many seconds"
-    )
     args=parser.parse_args()
     return args
 
@@ -159,8 +152,7 @@ def main():
     tokenizer=BertTokenizerFast.from_pretrained("bert-base-uncased")
 
     logger.info(f"Loading Model")
-    # model=BertModel(config)
-    model=BertModel.from_pretrained("bert-base-uncased")
+    model=BertModel(config)
 
     model.resize_token_embeddings(len(tokenizer))
 
@@ -185,75 +177,67 @@ def main():
                                         optimizer=args.optimizer, similarity_criterion="feature",
                                         metric="cosine", eta=1, stopIfZeroGain=False,
                                         stopIfNegativeGain=False, verbose=False, lambdaVal=1, sparse_rep=False)
-    
-    logger.info("Beginning the main loop")
-    program_start_time=time.time()
-    while True:
-        logger.info("Loading Checkpoint")
-        # accelerator.load_state(args.model_checkpoint_dir)
-        pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
-        model.eval()
-        representations=[]
-        batch_indices=[]
-        total_cnt=0
-        total_storage=0
-        for step, batch in enumerate(full_dataloader):
-            with torch.no_grad():
-                output=model(**batch, output_hidden_states=True)
-            embeddings=output["hidden_states"][args.layer_for_embeddings]
-            mask=(batch["attention_mask"].unsqueeze(-1).expand(embeddings.size()).float())
-            mask1=((batch["token_type_ids"].unsqueeze(-1).expand(embeddings.size()).float())==0)
-            mask=mask*mask1
-            mean_pooled=torch.sum(embeddings*mask, 1)/torch.clamp(mask.sum(1), min=1e-9)
-            mean_pooled=accelerator.gather(mean_pooled)
-            total_cnt+=mean_pooled.size(0)
-            if accelerator.is_main_process:
-                mean_pooled=mean_pooled.cpu()
-                total_storage+=sys.getsizeof(mean_pooled.storage())
-                representations.append(mean_pooled)
-            pbar.update(1)
+
+    logger.info("Loading Checkpoint")
+    accelerator.load_state(args.model_checkpoint_dir)
+    pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
+    model.eval()
+    representations=[]
+    batch_indices=[]
+    total_cnt=0
+    total_storage=0
+    for step, batch in enumerate(full_dataloader):
+        with torch.no_grad():
+            output=model(**batch, output_hidden_states=True)
+        embeddings=output["hidden_states"][args.layer_for_embeddings]
+        mask=(batch["attention_mask"].unsqueeze(-1).expand(embeddings.size()).float())
+        mask1=((batch["token_type_ids"].unsqueeze(-1).expand(embeddings.size()).float())==0)
+        mask=mask*mask1
+        mean_pooled=torch.sum(embeddings*mask, 1)/torch.clamp(mask.sum(1), min=1e-9)
+        mean_pooled=accelerator.gather(mean_pooled)
+        total_cnt+=mean_pooled.size(0)
         if accelerator.is_main_process:
-            representations=torch.cat(representations, dim=0)
-            representations=representations[:len(train_dataset)]
-            total_storage+=sys.getsizeof(representations.storage())
-            representations=representations.numpy()
-            logger.info("Representations size: {}, Total number of samples: {}".format(total_storage/(1024*1024), total_cnt))
-            batch_indices=list(range(len(train_dataset)))
-            logger.info("Length of indices: {}".format(len(batch_indices)))
-            logger.info("Representations gathered. Shape of representations: {}. Length of indices: {}".format(representations.shape, len(batch_indices)))
-        if accelerator.is_main_process:
-            partition_indices, greedyIdx, gains = subset_strategy.select(len(batch_indices)-1, batch_indices, representations, parallel_processes=args.parallel_processes, return_gains=True)
-            probs=[]
-            greedyList=[]
-            gains=[]
-            subset_indices=[[]]
-            i=0
-            for p in gains:
-                greedyList.append(greedyIdx[i:i+len(p)])
-                i+=len(p)
-            probs=[taylor_softmax_v1(torch.from_numpy(np.array([partition_gains])/args.temperature)).numpy()[0] for partition_gains in gains]
-            for i, partition_prob in enumerate(probs):
-                rng=np.random.default_rng(int(time.time()))
-                partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
-                subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
-            now=time.now()
-            timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
-            output_file=f"partition_indices_{timestamp}.pkl"
-            output_file=os.path.join(args.partitions_dir, output_file)
-            with open(output_file, "wb") as f:
-                pickle.dump(partition_indices, f)
-            output_file=f"subset_indices_{timestamp}.pt"
-            output_file=os.path.join(args.subset_dir, output_file)
-            torch.save(torch.tensor(subset_indices[0]), output_file)
-            output_file=f"gains_{timestamp}.pkl"
-            output_file=os.path.join(args.subset_dir, output_file)
-            with open(output_file, "wb") as f:
-                pickle.dump(gains, f)
-        accelerator.wait_for_everyone()
-        time_now=time.time()
-        if time_now-program_start_time>=args.stop_after:
-            break
-        break
+            mean_pooled=mean_pooled.cpu()
+            total_storage+=sys.getsizeof(mean_pooled.storage())
+            representations.append(mean_pooled)
+        pbar.update(1)
+    if accelerator.is_main_process:
+        representations=torch.cat(representations, dim=0)
+        representations=representations[:len(train_dataset)]
+        total_storage+=sys.getsizeof(representations.storage())
+        representations=representations.numpy()
+        logger.info("Representations size: {}, Total number of samples: {}".format(total_storage/(1024*1024), total_cnt))
+        batch_indices=list(range(len(train_dataset)))
+        logger.info("Length of indices: {}".format(len(batch_indices)))
+        logger.info("Representations gathered. Shape of representations: {}. Length of indices: {}".format(representations.shape, len(batch_indices)))
+    if accelerator.is_main_process:
+        partition_indices, greedyIdx, gains = subset_strategy.select(len(batch_indices)-1, batch_indices, representations, parallel_processes=args.parallel_processes, return_gains=True)
+        probs=[]
+        greedyList=[]
+        gains=[]
+        subset_indices=[[]]
+        i=0
+        for p in gains:
+            greedyList.append(greedyIdx[i:i+len(p)])
+            i+=len(p)
+        probs=[taylor_softmax_v1(torch.from_numpy(np.array([partition_gains])/args.temperature)).numpy()[0] for partition_gains in gains]
+        for i, partition_prob in enumerate(probs):
+            rng=np.random.default_rng(int(time.time()))
+            partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
+            subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
+        now=datetime.datetime.now()
+        timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
+        output_file=f"partition_indices_{timestamp}.pkl"
+        output_file=os.path.join(args.partitions_dir, output_file)
+        with open(output_file, "wb") as f:
+            pickle.dump(partition_indices, f)
+        output_file=f"subset_indices_{timestamp}.pt"
+        output_file=os.path.join(args.subset_dir, output_file)
+        torch.save(torch.tensor(subset_indices[0]), output_file)
+        output_file=f"gains_{timestamp}.pkl"
+        output_file=os.path.join(args.subset_dir, output_file)
+        with open(output_file, "wb") as f:
+            pickle.dump(gains, f)
 
 if __name__=="__main__":
     main()

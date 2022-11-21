@@ -31,7 +31,7 @@ def main():
     os.makedirs(partitions_dir, exist_ok=True)
     os.environ["CUDA_VISIBLE_DEVICES"]=args.visible_gpus
     l=[
-        "accelerate", "launch", "--main_process_port", f"{args.main_process_port}", "get_subset.py",
+        "accelerate", "launch", "--main_process_port", f"{args.main_process_port}", "select_subset.py",
         "--log_dir", log_dir,
         "--subset_dir", subset_dir,
         "--partitions_dir", partitions_dir,
