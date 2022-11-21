@@ -53,12 +53,6 @@ def parse_args():
         help="The directory to which selected subsets should be written"
     )
     parser.add_argument(
-        "--partitions_dir",
-        type=str,
-        required=True,
-        help="The directory to which partition information should be written"
-    )
-    parser.add_argument(
         "--data_directory",
         type=str,
         default=None,
@@ -118,6 +112,12 @@ def parse_args():
         default="LazyGreedy",
         help="Optimizer to use for submodular optimization"
     )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=1.0,
+        help="temperature while calculating taylor softmax"
+    )
     args=parser.parse_args()
     return args
 
@@ -125,9 +125,9 @@ def main():
     args=parse_args()
     init_process_group=InitProcessGroupKwargs(timeout=datetime.timedelta(seconds=75000))
     accelerator=Accelerator(kwargs_handlers=[init_process_group])
-
+    timestamp=datetime.datetime.now().strftime("%d_%m_%Y_%H.%M.%S")
     logging.basicConfig(
-        filename=args.log_dir+"/subset_selection.log",
+        filename=os.path.join(args.log_dir,f"subset_selection_{timestamp}.log"),
         filemode="w",
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -225,10 +225,9 @@ def main():
             rng=np.random.default_rng(int(time.time()))
             partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
             subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
-        now=datetime.datetime.now()
-        timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
+        timestamp=os.path.basename(args.model_checkpoint_dir)
         output_file=f"partition_indices_{timestamp}.pkl"
-        output_file=os.path.join(args.partitions_dir, output_file)
+        output_file=os.path.join(args.subset_dir, output_file)
         with open(output_file, "wb") as f:
             pickle.dump(partition_indices, f)
         output_file=f"subset_indices_{timestamp}.pt"
