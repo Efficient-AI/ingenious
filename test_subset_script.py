@@ -4,7 +4,7 @@ from datetime import datetime
 import argparse
 
 def parse_args():
-    parser=argparse.ArgumentParser(description="test script")
+    parser=argparse.ArgumentParser(description="test subset script")
     parser.add_argument(
         "--visible_gpus",
         type=str,

@@ -49,6 +49,7 @@ Description of arguments to this script:
 """
 import argparse
 import datetime
+import time
 import logging
 import math
 import os
@@ -343,7 +344,7 @@ def main():
     if accelerator.is_main_process:
         with open(os.path.join(args.log_dir,"parameters.txt"), "w") as f:
             for item in all_args:
-                f.write(item)
+                f.write(str(item))
                 f.write("\n")
     accelerator.wait_for_everyone()
 
@@ -406,7 +407,7 @@ def main():
         )
     else:
         logger.info("Training a new model from scratch")
-        model=AutoModelForPreTraining(config)
+        model=AutoModelForPreTraining.from_config(config)
 
     model.resize_token_embeddings(len(tokenizer))
     # Preprocessing the datasets
@@ -647,7 +648,7 @@ def main():
         for index in random.sample(range(len(train_dataset)), 3):
             logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
     
-        # Data Collator
+    # Data Collator
     # This one will take care of the randomly masking the tokens.
     data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm_probability=args.mlm_probability)
 
@@ -721,11 +722,11 @@ def main():
         accelerator.load_state(args.resume_from_checkpoint)
     
     time_now=datetime.datetime.now()
-    latest_checkpoint_timestamp=time_now.strftime("%d_%m_%Y_%H.%M.%S")
+    latest_checkpoint_timestamp=time_now.strftime("%d_%m_%Y_%H.%M")
     output_dir=os.path.join(args.output_dir, latest_checkpoint_timestamp)
     accelerator.save_state(output_dir)
     if accelerator.is_main_process:
-        subprocess.Popen(f"nohup accelerator launch select_subset.py --main_process_port 55553 --log_dir {args.log_dir} --subset_dir {args.subset_dir} --data_directory {preprocessed_data_directory} --model_checkpoint_dir {output_dir} --per_device_batch_size 128 --subset_fraction 0.25 --selection_strategy fl --partition_strategy random --layer_for_embeddings 9 --num_partitions 5000 --parallel_processes 96 --optimizer LazyGreedy", shell=True)
+        subprocess.Popen(f"nohup accelerate launch --main_process_port 55553 select_subset.py --log_dir {args.log_dir} --subset_dir {args.subset_dir} --data_directory {preprocessed_data_directory} --model_checkpoint_dir {output_dir} --per_device_batch_size 128 --subset_fraction 0.25 --selection_strategy fl --partition_strategy random --layer_for_embeddings 9 --num_partitions 5000 --parallel_processes 96 --optimizer LazyGreedy > ./logs/subset_selection_logs.txt", shell=True)
     accelerator.wait_for_everyone()
     logger.info(f"Begin the training")
     while completed_steps<args.max_train_steps:
@@ -757,13 +758,17 @@ def main():
                 
             if completed_steps%args.select_every==0:
                 if accelerator.is_main_process:
-                    subset_indices=[torch.load(os.path.join(args.subset_dir, "subset_indices_{latest_checkpoint_timestamp}.pt")).tolist()]
+                    subset_indices=[torch.load(os.path.join(args.subset_dir, f"subset_indices_{latest_checkpoint_timestamp}.pt")).tolist()]
+                else:
+                    subset_indices=[[]]
+                accelerator.wait_for_everyone()
+                broadcast_object_list(subset_indices)
                 time_now=datetime.datetime.now()
-                latest_checkpoint_timestamp=time_now.strftime("%d_%m_%Y_%H.%M.%S")
+                latest_checkpoint_timestamp=time_now.strftime("%d_%m_%Y_%H.%M")
                 output_dir=os.path.join(args.output_dir, latest_checkpoint_timestamp)
                 accelerator.save_state(output_dir)
                 if accelerator.is_main_process:
-                    subprocess.Popen(f"nohup accelerator launch select_subset.py --main_process_port 55553 --log_dir {args.log_dir} --subset_dir {args.subset_dir} --data_directory {preprocessed_data_directory} --model_checkpoint_dir {output_dir} --per_device_batch_size 128 --subset_fraction 0.25 --selection_strategy fl --partition_strategy random --layer_for_embeddings 9 --num_partitions 5000 --parallel_processes 96 --optimizer LazyGreedy", shell=True)
+                    subprocess.Popen(f"nohup accelerate launch --main_process_port 55553 select_subset.py --log_dir {args.log_dir} --subset_dir {args.subset_dir} --data_directory {preprocessed_data_directory} --model_checkpoint_dir {output_dir} --per_device_batch_size 128 --subset_fraction 0.25 --selection_strategy fl --partition_strategy random --layer_for_embeddings 9 --num_partitions 5000 --parallel_processes 96 --optimizer LazyGreedy > ./logs/subset_selection_logs.txt", shell=True)
                 accelerator.wait_for_everyone()
                 broadcast_object_list(subset_indices)
                 subset_dataset = full_dataset.select(subset_indices[0])

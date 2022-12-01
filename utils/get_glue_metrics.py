@@ -29,12 +29,12 @@ def main():
     args=parse_args()
     model_dir=args.model_dir
     log_dir=model_dir
-    for i in range(1, 11):
+    for i in range(1, 21):
         model_name_or_path=model_dir#+"step_{}/".format(100)
         if i>5:
             tasks=["cola", "mrpc", "rte", "stsb"]
         else:
-            tasks=["qnli", "mnli", "qqp"] #can also add "mnli", "qnli", "qqp", "sst2" 
+            tasks=["cola", "mrpc", "rte", "stsb", "sst2", "qnli", "mnli", "qqp"] #can also add "mnli", "qnli", "qqp", "sst2" 
         glue_log_dir=model_name_or_path+f"glue_run_{i}/"
         os.makedirs(glue_log_dir, exist_ok=True)
         for task in tasks:

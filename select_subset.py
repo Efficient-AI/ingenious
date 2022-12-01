@@ -24,8 +24,8 @@ from accelerate.utils import set_seed
 from transformers import (
     BertConfig,
     BertTokenizerFast,
-    BertModel,
-    DataCollatorWithPadding,
+    BertForPreTraining,
+    DataCollatorForLanguageModeling,
 )
 from transformers.utils.versions import require_version
 from cords.selectionstrategies.SL import SubmodStrategy
@@ -152,18 +152,18 @@ def main():
     tokenizer=BertTokenizerFast.from_pretrained("bert-base-uncased")
 
     logger.info(f"Loading Model")
-    model=BertModel(config)
+    model=BertForPreTraining(config)
 
     model.resize_token_embeddings(len(tokenizer))
 
     train_dataset=dataset["train"]
-    train_dataset=train_dataset.remove_columns(["special_tokens_mask", "next_sentence_label"])
+    # train_dataset=train_dataset.remove_columns(["special_tokens_mask", "next_sentence_label"])
 
     num_samples=int(round(len(train_dataset)*args.subset_fraction, 0))
 
     logger.info(f"Full data has {len(train_dataset)} datapoints, subset data will have {num_samples} datapoints.")
 
-    data_collator=DataCollatorWithPadding(tokenizer=tokenizer)
+    data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
     full_dataloader=DataLoader(
         train_dataset, shuffle=False, collate_fn=data_collator, batch_size=args.per_device_batch_size
@@ -214,7 +214,6 @@ def main():
         partition_indices, greedyIdx, gains = subset_strategy.select(len(batch_indices)-1, batch_indices, representations, parallel_processes=args.parallel_processes, return_gains=True)
         probs=[]
         greedyList=[]
-        gains=[]
         subset_indices=[[]]
         i=0
         for p in gains:
