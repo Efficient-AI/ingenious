@@ -39,3 +39,8 @@ openwebtext_tfidf_vectors.npz
 /openwebtext_sents_dataset/
 /openwebtext_for_tfidf/
 prepare_sents.py
+wikitext-*
+gluelogs*
+*.pkl
+*.npy
+bert_first_sentences/

@@ -8,6 +8,7 @@ def parse_args():
     parser.add_argument(
         "--visible_gpus",
         type=str,
+        default="0,1,2,3,4,5,6,7",
         help="visible_gpus"
     )
     parser.add_argument(
@@ -34,16 +35,18 @@ def main():
         "accelerate", "launch", "--main_process_port", f"{args.main_process_port}", "select_subset.py",
         "--log_dir", log_dir,
         "--subset_dir", subset_dir,
-        "--partitions_dir", partitions_dir,
-        "--data_directory", "bert_dataset_prepared",
-        "--model_checkpoint_dir", "models/huggingface_bert",
+        # "--partitions_dir", partitions_dir,
+        "--data_directory", "bert_first_sentences",
+        "--model_checkpoint_dir", "/home/hrenduchinta/LM-pretraining/models/fl_bert_23_11_2022_06:34:28/step_250000",
         "--per_device_batch_size", "128",
         "--subset_fraction", "0.25",
         "--selection_strategy", "fl",
+        "--partition_strategy", "kmeans_clustering",
         "--layer_for_embeddings", "9",
         "--num_partitions", "5000",
         "--parallel_processes", "96",
         "--optimizer", "LazyGreedy",
+        "--temperature", "1.0",
     ]
     subprocess.run(l)
 

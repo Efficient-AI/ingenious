@@ -5,6 +5,11 @@ from multiprocessing import Pool
 import tqdm
 import submodlib
 import faiss
+import pickle
+import numpy as np
+# from sklearn.metrics.pairwise import rbf_kernel
+from sklearn.metrics.pairwise import euclidean_distances
+# from .helper import get_rbf_kernel
 
 def query_generator(representations, partition_indices, partition_budgets, smi_func_type, optimizer, metric, sparse_rep, return_gains):
     for i, partition in enumerate(partition_indices):
@@ -15,7 +20,10 @@ def partition_subset_strat(args):
     
 def partition_subset_selection(representations, partition_budget, partition_ind, smi_func_type, optimizer, metric, sparse_rep, return_gains):
     if smi_func_type in ["fl", "logdet", "gc"]:
-        data_sijs=submodlib.helper.create_kernel(X=representations, metric=metric, method="sklearn")
+        # data_sijs=submodlib.helper.create_kernel(X=representations, metric=metric, method="sklearn")
+        # data_sijs=rbf_kernel(representations)
+        dist_mat=euclidean_distances(representations)
+        data_sijs=np.exp(-dist_mat/(0.1*dist_mat.mean()))
     else:
         raise Exception(f"{smi_func_type} not yet supported by this script")
     
@@ -27,7 +35,7 @@ def partition_subset_selection(representations, partition_budget, partition_ind,
     if smi_func_type == 'gc':
         obj = submodlib.GraphCutFunction(n = representations.shape[0],
                                         mode = 'dense',
-                                        lambdaVal = 1,
+                                        lambdaVal = 0.4,
                                         separate_rep=False,
                                         ggsijs = data_sijs)
     if smi_func_type == 'logdet':
@@ -82,7 +90,7 @@ class SubmodStrategy():
         kmeans_start_time=time.time()
         n=representations.shape[0]
         d=representations.shape[1]
-        kmeans=faiss.Kmeans(d, num_partitions, spherical=True, max_points_per_centroid=math.ceil(n/num_partitions), niter=20, verbose=True, gpu=True)
+        kmeans=faiss.Kmeans(d, num_partitions, spherical=True, niter=20, verbose=True, gpu=True)
         self.logger.info("Starting training")
         kmeans.train(representations)
         D, I=kmeans.index.search(representations, 1)
@@ -91,8 +99,8 @@ class SubmodStrategy():
             partition_indices[lab].append(indices[i])
         kmeans_end_time=time.time()
         self.logger.info("Kmeans routine took %.4f of time", kmeans_end_time-kmeans_start_time)
-        del kmeans
-        # pickle.dump(partition_indices, open("partitions.pkl", "wb"))
+        with open("partitions.pkl", "wb") as f:
+            pickle.dump(partition_indices, f)
         return partition_indices
     
     def select(self, budget, indices, representations, parallel_processes=96, return_gains=False):
@@ -104,6 +112,7 @@ class SubmodStrategy():
             partition_budgets=[min(math.ceil((len(partition)/len(indices)) * budget), len(partition)-1) for partition in partition_indices]
         elif self.partition_strategy=="kmeans_clustering":
             partition_indices=self.kmeans_partition(self.num_partitions, representations, indices)
+            partition_indices=[partition for partition in partition_indices if len(partition)>=2]
             partition_budgets=[min(math.ceil((len(partition)/len(indices)) * budget), len(partition)-1) for partition in partition_indices]
         else:
             partition_indices=[list(range(len(indices)))]

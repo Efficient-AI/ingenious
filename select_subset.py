@@ -24,8 +24,8 @@ from accelerate.utils import set_seed
 from transformers import (
     BertConfig,
     BertTokenizerFast,
-    BertForPreTraining,
-    DataCollatorForLanguageModeling,
+    BertModel,
+    DataCollatorWithPadding,
 )
 from transformers.utils.versions import require_version
 from cords.selectionstrategies.SL import SubmodStrategy
@@ -34,6 +34,7 @@ from accelerate import InitProcessGroupKwargs
 from helper_fns import taylor_softmax_v1
 import numpy as np
 import faiss
+import subprocess
 
 logger=get_logger(__name__)
 require_version("datasets>=1.8.0", "To fix: pip install -r requirements.txt")
@@ -152,18 +153,19 @@ def main():
     tokenizer=BertTokenizerFast.from_pretrained("bert-base-uncased")
 
     logger.info(f"Loading Model")
-    model=BertForPreTraining(config)
+    if accelerator.is_main_process:
+        filepath=os.path.join(args.model_checkpoint_dir, "config.json")
+        subprocess.run(["cp", "config.json", f"{filepath}"])
+    accelerator.wait_for_everyone()
+    model=BertModel.from_pretrained(args.model_checkpoint_dir)
 
     model.resize_token_embeddings(len(tokenizer))
 
     train_dataset=dataset["train"]
-    # train_dataset=train_dataset.remove_columns(["special_tokens_mask", "next_sentence_label"])
-
     num_samples=int(round(len(train_dataset)*args.subset_fraction, 0))
-
     logger.info(f"Full data has {len(train_dataset)} datapoints, subset data will have {num_samples} datapoints.")
 
-    data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    data_collator=DataCollatorWithPadding(tokenizer=tokenizer)
 
     full_dataloader=DataLoader(
         train_dataset, shuffle=False, collate_fn=data_collator, batch_size=args.per_device_batch_size
@@ -171,15 +173,7 @@ def main():
 
     model, full_dataloader=accelerator.prepare(model, full_dataloader)
 
-    if args.selection_strategy in ["fl", "logdet", "gc"]:
-        subset_strategy=SubmodStrategy(logger, args.selection_strategy, 
-                                        num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
-                                        optimizer=args.optimizer, similarity_criterion="feature",
-                                        metric="cosine", eta=1, stopIfZeroGain=False,
-                                        stopIfNegativeGain=False, verbose=False, lambdaVal=1, sparse_rep=False)
-
     logger.info("Loading Checkpoint")
-    accelerator.load_state(args.model_checkpoint_dir)
     pbar=tqdm(range(len(full_dataloader)), disable=not accelerator.is_local_main_process)
     model.eval()
     representations=[]
@@ -204,38 +198,15 @@ def main():
     if accelerator.is_main_process:
         representations=torch.cat(representations, dim=0)
         representations=representations[:len(train_dataset)]
-        total_storage+=sys.getsizeof(representations.storage())
-        representations=representations.numpy()
-        logger.info("Representations size: {}, Total number of samples: {}".format(total_storage/(1024*1024), total_cnt))
+        representations=representations.numpy().astype("float32", copy=False)
+        faiss.normalize_L2(representations)
+        total_storage=sys.getsizeof(representations)
+        logger.info("Representations size: {}, Total number of samples: {}".format(total_storage/(2**30), total_cnt))
         batch_indices=list(range(len(train_dataset)))
         logger.info("Length of indices: {}".format(len(batch_indices)))
         logger.info("Representations gathered. Shape of representations: {}. Length of indices: {}".format(representations.shape, len(batch_indices)))
-    if accelerator.is_main_process:
-        partition_indices, greedyIdx, gains = subset_strategy.select(len(batch_indices)-1, batch_indices, representations, parallel_processes=args.parallel_processes, return_gains=True)
-        probs=[]
-        greedyList=[]
-        subset_indices=[[]]
-        i=0
-        for p in gains:
-            greedyList.append(greedyIdx[i:i+len(p)])
-            i+=len(p)
-        probs=[taylor_softmax_v1(torch.from_numpy(np.array([partition_gains])/args.temperature)).numpy()[0] for partition_gains in gains]
-        for i, partition_prob in enumerate(probs):
-            rng=np.random.default_rng(int(time.time()))
-            partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
-            subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
-        timestamp=os.path.basename(args.model_checkpoint_dir)
-        output_file=f"partition_indices_{timestamp}.pkl"
-        output_file=os.path.join(args.subset_dir, output_file)
-        with open(output_file, "wb") as f:
-            pickle.dump(partition_indices, f)
-        output_file=f"subset_indices_{timestamp}.pt"
-        output_file=os.path.join(args.subset_dir, output_file)
-        torch.save(torch.tensor(subset_indices[0]), output_file)
-        output_file=f"gains_{timestamp}.pkl"
-        output_file=os.path.join(args.subset_dir, output_file)
-        with open(output_file, "wb") as f:
-            pickle.dump(gains, f)
+        np.save("representations.npy", representations)
+        subprocess.Popen(f"nohup accelerate launch --main_process_port 55400 submod_optimization.py --log_dir {args.log_dir} --selection_strategy {args.selection_strategy} --num_partitions {args.num_partitions} --partition_strategy {args.partition_strategy} --optimizer {args.optimizer} --subset_fraction {args.subset_fraction} --parallel_processes {args.parallel_processes} --temperature {args.temperature} --model_checkpoint_dir {args.model_checkpoint_dir} --subset_dir {args.subset_dir} > ./logs/submod_optimization.txt", shell=True)
 
 if __name__=="__main__":
     main()

@@ -23,26 +23,29 @@ def main():
     args=parse_args()
     now=datetime.now()
     timestamp=now.strftime("%d_%m_%Y_%H:%M:%S")
-    log_dir="./logs/fl_bert_"+timestamp+"/"
-    model_dir="./models/fl_bert_"+timestamp +"/"
+    log_dir="./logs/wikitext_bert_"+timestamp+"/"
+    model_dir="./models/wikitext_bert_"+timestamp +"/"
     subset_dir="./subsets/fl_bert_"+timestamp+"/"
     os.environ["CUDA_VISIBLE_DEVICES"]=args.visible_gpus
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(model_dir, exist_ok=True)
+    os.makedirs(subset_dir, exist_ok=True)
     l=[
-        "accelerate", "launch", "--main_process_port", f"{args.main_process_port}", "run_mlm_nsp_with_subset_selection.py",
+        "accelerate", "launch", "--main_process_port", f"{args.main_process_port}", "run_lm_with_subsets_importance_sampling_1.py",
         "--preprocessed",
         "--log_dir", log_dir,
         "--subset_dir", subset_dir,
         "--load_data_from_disk",
-        "--data_directory", "./bert_dataset_prepared",
+        "--data_directory", "./wikitext-103-prepared",
         "--tokenizer_name", "bert-base-uncased",
-        "--model_type", "bert",
+        # "--model_type", "bert",
         "--preprocess_batch_size", "2000",
         "--per_device_train_batch_size", "128",
         "--per_device_eval_batch_size", "128",
         "--learning_rate", "1e-4",
         "--lr_max_steps", "1000000",
         "--weight_decay" ,"0.01",
-        "--max_train_steps", "500000",
+        "--max_train_steps", "100000",
         "--gradient_accumulation_steps", "1",
         "--num_warmup_steps", "10000",
         "--output_dir", model_dir,
@@ -52,14 +55,18 @@ def main():
         "--short_seq_prob", "0.1",
         "--nsp_probability", "0.5",
         "--subset_fraction", "0.25",
-        "--select_every", "25000",
-        "--partition_strategy", "random",
+        "--select_every", "10000",
+        "--partition_strategy", "kmeans_clustering",
         "--layer_for_similarity_computation", "9",
-        "--num_partitions", "5000",
+        "--num_partitions", "50",
         "--selection_strategy", "fl",
-        "--parallel_processes", "96",
-        "--checkpointing_steps", "25000",
+        "--parallel_processes", "50",
+        "--num_warmstart_epochs", "0",
+        "--checkpointing_steps", "10000",
     ]
+    with open(f"{log_dir}parameters.txt", "w") as f:
+        for i in l:
+            f.write(f"{i}\n")
     subprocess.run(l)
 
 if __name__=="__main__":

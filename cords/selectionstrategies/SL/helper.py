@@ -5,6 +5,7 @@ import re
 import sys
 from scipy import sparse
 from tqdm.auto import tqdm
+from numba import jit
 
 def create_sparse_kernel_faiss_innerproduct(
         X, index_key, logger, ngpu=-1, 
@@ -265,4 +266,9 @@ def create_sparse_kernel_faiss_innerproduct(
     np.save(open("row_ind.npy", "wb"), row_ind)
     np.save(open("col_ind.npy", "wb"), col_ind)
     sparse_csr = sparse.csr_matrix((data, (row_ind, col_ind)), shape=(nb,nb))
-    return sparse_csr
+    return 
+    
+@jit(nopython=True, parallel=True)
+def get_rbf_kernel(dist_mat, kw=0.1):
+	sim = np.exp(-dist_mat/(kw*dist_mat.mean()))
+	return sim

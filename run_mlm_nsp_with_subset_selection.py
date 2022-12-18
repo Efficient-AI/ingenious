@@ -625,7 +625,7 @@ def main():
         dataset=load_from_disk(args.data_directory)
         train_dataset=dataset["train"]
         eval_dataset=dataset["validation"]
-        preprocessed_data_directory=args.data_directory
+        preprocessed_data_directory="bert_first_sentences"
     
     #Initial Random Subset Selection 
     if accelerator.is_main_process:
@@ -726,7 +726,7 @@ def main():
     output_dir=os.path.join(args.output_dir, latest_checkpoint_timestamp)
     accelerator.save_state(output_dir)
     if accelerator.is_main_process:
-        subprocess.Popen(f"nohup accelerate launch --main_process_port 55553 select_subset.py --log_dir {args.log_dir} --subset_dir {args.subset_dir} --data_directory {preprocessed_data_directory} --model_checkpoint_dir {output_dir} --per_device_batch_size 128 --subset_fraction 0.25 --selection_strategy fl --partition_strategy random --layer_for_embeddings 9 --num_partitions 5000 --parallel_processes 96 --optimizer LazyGreedy > ./logs/subset_selection_logs.txt", shell=True)
+        subprocess.Popen(f"nohup accelerate launch --main_process_port 55553 select_subset.py --log_dir {args.log_dir} --subset_dir {args.subset_dir} --data_directory {preprocessed_data_directory} --model_checkpoint_dir {output_dir} --per_device_batch_size 128 --subset_fraction 0.25 --selection_strategy fl --partition_strategy kmeans_clustering --layer_for_embeddings 9 --num_partitions 5000 --parallel_processes 64 --optimizer LazyGreedy > ./logs/subset_selection_logs.txt", shell=True)
     accelerator.wait_for_everyone()
     logger.info(f"Begin the training")
     while completed_steps<args.max_train_steps:
@@ -768,7 +768,7 @@ def main():
                 output_dir=os.path.join(args.output_dir, latest_checkpoint_timestamp)
                 accelerator.save_state(output_dir)
                 if accelerator.is_main_process:
-                    subprocess.Popen(f"nohup accelerate launch --main_process_port 55553 select_subset.py --log_dir {args.log_dir} --subset_dir {args.subset_dir} --data_directory {preprocessed_data_directory} --model_checkpoint_dir {output_dir} --per_device_batch_size 128 --subset_fraction 0.25 --selection_strategy fl --partition_strategy random --layer_for_embeddings 9 --num_partitions 5000 --parallel_processes 96 --optimizer LazyGreedy > ./logs/subset_selection_logs.txt", shell=True)
+                    subprocess.Popen(f"nohup accelerate launch --main_process_port 55553 select_subset.py --log_dir {args.log_dir} --subset_dir {args.subset_dir} --data_directory {preprocessed_data_directory} --model_checkpoint_dir {output_dir} --per_device_batch_size 128 --subset_fraction 0.25 --selection_strategy fl --partition_strategy kmeans_clustering --layer_for_embeddings 9 --num_partitions 5000 --parallel_processes 64 --optimizer LazyGreedy > ./logs/subset_selection_logs.txt", shell=True)
                 accelerator.wait_for_everyone()
                 broadcast_object_list(subset_indices)
                 subset_dataset = full_dataset.select(subset_indices[0])
