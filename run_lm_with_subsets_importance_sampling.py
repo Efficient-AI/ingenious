@@ -661,7 +661,7 @@ def main():
     if args.selection_strategy in ['fl', 'logdet', 'gc']:
         subset_strategy = SubmodStrategy(logger, args.selection_strategy,
                                     num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
-                                    optimizer='LazierThanLazyGreedy', similarity_criterion='feature', 
+                                    optimizer='LazyGreedy', similarity_criterion='feature', 
                                     metric='cosine', eta=1, stopIfZeroGain=False, 
                                     stopIfNegativeGain=False, verbose=False, lambdaVal=1)
     
@@ -791,8 +791,8 @@ def main():
                     greedyList.append(greedyIdx[i:i+len(p)])
                     i+=len(p)
                 probs=[taylor_softmax_v1(torch.from_numpy(np.array([partition_gains])/args.temperature)).numpy()[0] for partition_gains in gains]
+                rng=np.random.default_rng(int(time.time()))
                 for i, partition_prob in enumerate(probs):
-                    rng=np.random.default_rng(int(time.time()))
                     partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
                     init_subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
             else:
@@ -860,8 +860,8 @@ def main():
                 elif args.selection_strategy in ["fl", "logdet", "gc"]:
                     if accelerator.is_main_process:
                         init_subset_indices = [[]]
+                        rng=np.random.default_rng(int(time.time()))
                         for i, partition_prob in enumerate(probs):
-                            rng=np.random.default_rng(int(time.time()))
                             partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
                             init_subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
                     else:

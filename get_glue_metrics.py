@@ -1,6 +1,7 @@
 import os
 import subprocess
 import argparse
+import time
 
 def parse_args():
     parser=argparse.ArgumentParser(description="superglue")
@@ -29,13 +30,13 @@ def main():
     args=parse_args()
     model_dir=args.model_dir
     log_dir=model_dir
-    for i in range(1, 21):
+    for i in range(5, 21):
         model_name_or_path=model_dir#+"step_{}/".format(100)
         if i>5:
-            tasks=["mrpc", "stsb"]
+            tasks=["cola", "rte", "mrpc", "stsb"]
         else:
-            tasks=["mrpc", "stsb", "sst2", "qnli", "mnli", "qqp"] #can also add "mnli", "qnli", "qqp", "sst2" 
-        tasks=["cola", "rte", "mrpc", "stsb"]
+            tasks=["cola", "rte", "mrpc", "stsb", "sst2", "qnli", "mnli", "qqp"]
+        # tasks=["qqp"]
         glue_log_dir=model_name_or_path+f"glue_run_{i}/"
         os.makedirs(glue_log_dir, exist_ok=True)
         for task in tasks:
@@ -55,6 +56,7 @@ def main():
                 # "--output_dir", f"{glue_log_dir}{task}/"
             ]
             subprocess.run(l)
+            # time.sleep(60)
     
 if __name__=="__main__":
     main()

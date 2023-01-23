@@ -23,7 +23,7 @@ def partition_subset_selection(representations, partition_budget, partition_ind,
         # data_sijs=submodlib.helper.create_kernel(X=representations, metric=metric, method="sklearn")
         # data_sijs=rbf_kernel(representations)
         dist_mat=euclidean_distances(representations)
-        data_sijs=np.exp(-dist_mat/(0.1*dist_mat.mean()))
+        data_sijs=np.exp(-dist_mat/dist_mat.mean())
     else:
         raise Exception(f"{smi_func_type} not yet supported by this script")
     
@@ -90,7 +90,7 @@ class SubmodStrategy():
         kmeans_start_time=time.time()
         n=representations.shape[0]
         d=representations.shape[1]
-        kmeans=faiss.Kmeans(d, num_partitions, spherical=True, niter=20, verbose=True, gpu=True)
+        kmeans=faiss.Kmeans(d, num_partitions, spherical=False, niter=20, verbose=True, gpu=True)
         self.logger.info("Starting training")
         kmeans.train(representations)
         D, I=kmeans.index.search(representations, 1)

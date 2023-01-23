@@ -763,27 +763,28 @@ def main():
             total_cnt = 0
             total_storage = 0
 
-            for step, batch in enumerate(full_dataloader):
-                with torch.no_grad():
-                    output=model2(**batch, output_hidden_states=True)
-                embeddings=output['hidden_states'][args.layer_for_similarity_computation]
-                mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
-                mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
-                mask=mask*mask1
-                mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
-                mean_pooled = accelerator.gather(mean_pooled)
-                total_cnt += mean_pooled.size(0)
-                if accelerator.is_main_process:
-                    mean_pooled = mean_pooled.cpu()
-                    total_storage += sys.getsizeof(mean_pooled.storage())
-                    representations.append(mean_pooled)
-                pbar.update(1)
+            # for step, batch in enumerate(full_dataloader):
+            #     with torch.no_grad():
+            #         output=model2(**batch, output_hidden_states=True)
+            #     embeddings=output['hidden_states'][args.layer_for_similarity_computation]
+            #     mask=(batch['attention_mask'].unsqueeze(-1).expand(embeddings.size()).float())
+            #     mask1=((batch['token_type_ids'].unsqueeze(-1).expand(embeddings.size()).float())==0)
+            #     mask=mask*mask1
+            #     mean_pooled=torch.sum(embeddings*mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
+            #     mean_pooled = accelerator.gather(mean_pooled)
+            #     total_cnt += mean_pooled.size(0)
+            #     if accelerator.is_main_process:
+            #         mean_pooled = mean_pooled.cpu()
+            #         total_storage += sys.getsizeof(mean_pooled.storage())
+            #         representations.append(mean_pooled)
+            #     pbar.update(1)
             if accelerator.is_main_process:
                 # representations = torch.from_numpy(faiss.rand((41543418, 768)))
-                representations=torch.cat(representations, dim = 0)
-                representations = representations[:len(full_dataset)]
-                total_storage += sys.getsizeof(representations.storage())
-                representations = representations.numpy()
+                # representations=torch.cat(representations, dim = 0)
+                # representations = representations[:len(full_dataset)]
+                # total_storage += sys.getsizeof(representations.storage())
+                # representations = representations.numpy()
+                representations=np.load("wikitext-103-glove-embeddings.npy")
                 logger.info('Representations Size: {}, Total number of samples: {}'.format(total_storage/(1024 * 1024), total_cnt))
                 batch_indices=list(range(len(full_dataset)))
                 logger.info('Length of indices: {}'.format(len(batch_indices)))
@@ -797,8 +798,8 @@ def main():
                     greedyList.append(greedyIdx[i:i+len(p)])
                     i+=len(p)
                 probs=[taylor_softmax_v1(torch.from_numpy(np.array([partition_gains])/args.temperature)).numpy()[0] for partition_gains in gains]
+                rng=np.random.default_rng(int(time.time()))
                 for i, partition_prob in enumerate(probs):
-                    rng=np.random.default_rng(int(time.time()))
                     partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
                     init_subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
             else:
@@ -866,8 +867,8 @@ def main():
                 elif args.selection_strategy in ["fl", "logdet", "gc"]:
                     if accelerator.is_main_process:
                         init_subset_indices = [[]]
+                        rng=np.random.default_rng(int(time.time()))
                         for i, partition_prob in enumerate(probs):
-                            rng=np.random.default_rng(int(time.time()))
                             partition_budget=min(math.ceil((len(partition_prob)/len(batch_indices)) * num_samples), len(partition_prob)-1)
                             init_subset_indices[0].extend(rng.choice(greedyList[i], size=partition_budget, replace=False, p=partition_prob).tolist())
                     else:
