@@ -4,10 +4,9 @@
 #### Run the following in a sequence to set up the environment for running the code. (It is assumed that you have anaconda installed)
 >- `conda create --name ingenious python=3.9`
 >- `conda activate ingenious`
->- `conda install pytorch torchvision torchaudio cudatoolkit=11.6 -c pytorch -c conda-forge`
->- `pip3 install git+https://github.com/huggingface/accelerate`
+>- `conda install pytorch==1.11.0 torchvision==0.12.0 torchaudio==0.11.0 cudatoolkit=11.3 -c pytorch`
 >- `pip3 install -r requirements.txt`
->- `git clone https://github.com/Language-Modelling/submodlib.git`
+>- `git clone https://github.com/Efficient-AI/submodlib.git`
 >- `cd submodlib`
 >- `pip3 install .`
 >- `conda install -c conda-forge faiss-gpu`
