@@ -44,3 +44,8 @@ gluelogs*
 *.pkl
 *.npy
 bert_first_sentences/
+nsp_zero/
+nsp_one/
+first_sent_nsp_zero/
+first_sent_nsp_one/
+ingenious_logs.txt
