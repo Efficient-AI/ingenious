@@ -1,6 +1,7 @@
 import os
 import subprocess
 import argparse
+import time
 
 def parse_args():
     parser=argparse.ArgumentParser(description="GLUE")
@@ -27,21 +28,20 @@ def parse_args():
 
 def main():
     args=parse_args()
-    model_dir=args.model_dir
-    log_dir=model_dir
-    for i in range(1, 21):
-        model_name_or_path=model_dir#+"step_{}/".format(100)
-        if i>5:
-            tasks=["cola", "mrpc", "rte", "stsb"]
+    model_name_or_path=args.model_dir
+    tasks=["cola", "mrpc", "rte", "stsb", "sst2", "qnli", "mnli", "qqp"]
+    for run in range(1, 21):
+        os.makedirs(os.path.join(model_name_or_path, f"glue_run_{run}"), exist_ok=True)
+    for i, task in enumerate(tasks):
+        if task in ["cola", "mrpc", "rte", "stsb"]:
+            num_runs=20
         else:
-            tasks=["cola", "mrpc", "rte", "stsb", "sst2", "qnli", "mnli", "qqp"] #can also add "mnli", "qnli", "qqp", "sst2" 
-        glue_log_dir=model_name_or_path+f"glue_run_{i}/"
-        os.makedirs(glue_log_dir, exist_ok=True)
-        for task in tasks:
+            num_runs=5
+        for run in range(1, num_runs+1):
             os.environ["CUDA_VISIBLE_DEVICES"]=args.visible_gpus
             l=[
                 "accelerate", "launch", "--main_process_port", f"{args.main_process_port}", "run_glue.py",
-                "--log_file", glue_log_dir+task+".log",
+                "--log_file", os.path.join(model_name_or_path, f"glue_run_{run}", f"{task}.log"),
                 "--task_name", task,
                 "--max_length", "128",
                 "--model_name_or_path", model_name_or_path,
@@ -50,10 +50,11 @@ def main():
                 "--learning_rate", f"5e-5",
                 "--weight_decay" ,"0.0",
                 "--num_train_epochs", "3",
-                # "--seed", "45646",
-                # "--output_dir", f"{glue_log_dir}{task}/"
+                "--seed", f"{run}",
             ]
             subprocess.run(l)
+            # wait for 1 minute
+            time.sleep(30)
     
 if __name__=="__main__":
     main()

@@ -909,6 +909,14 @@ def main():
         output_file=os.path.join(args.subset_dir, output_file)
         with open(output_file, "wb") as f:
             pickle.dump(partition_indices_nsp_one, f)
+        output_file=f"nsp_zero_greedy_indices_after_step_{completed_steps}.pkl"
+        output_file=os.path.join(args.subset_dir, output_file)
+        with open(output_file, "wb") as f:
+            pickle.dump(greedyIdx_nsp_zero, f)
+        output_file=f"nsp_one_greedy_indices_after_step_{completed_steps}.pkl"
+        output_file=os.path.join(args.subset_dir, output_file)
+        with open(output_file, "wb") as f:
+            pickle.dump(greedyIdx_nsp_one, f)
     accelerator.wait_for_everyone()
 
     nsp_zero_subset_dataset=nsp_zero.select(subset_indices_nsp_zero[0])

@@ -65,7 +65,7 @@ def main():
         "--parallel_processes", "96",
         "--num_warmstart_epochs", "2",
         "--checkpointing_steps", "25000",
-        "--temperature", "1.0"
+        "--temperature", "0.001"
     ]
     with open(os.path.join(log_dir, "parameters.txt"), "w") as f:
         for i in l:
