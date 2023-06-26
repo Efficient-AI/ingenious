@@ -20,10 +20,10 @@ def partition_subset_strat(args):
     
 def partition_subset_selection(representations, partition_budget, partition_ind, smi_func_type, optimizer, metric, sparse_rep, return_gains):
     if smi_func_type in ["fl", "logdet", "gc"]:
-        # data_sijs=submodlib.helper.create_kernel(X=representations, metric=metric, method="sklearn")
+        data_sijs=submodlib.helper.create_kernel(X=representations, metric=metric, method="sklearn")
         # data_sijs=rbf_kernel(representations)
-        dist_mat=euclidean_distances(representations)
-        data_sijs=np.exp(-dist_mat/dist_mat.mean())
+        # dist_mat=euclidean_distances(representations)
+        # data_sijs=np.exp(-dist_mat/dist_mat.mean())
     else:
         raise Exception(f"{smi_func_type} not yet supported by this script")
     
@@ -108,7 +108,9 @@ class SubmodStrategy():
         
         # return partitions of the data for subset selection
         if self.partition_strategy=="random":
-            partition_indices=self.random_partition(self.num_partitions, indices)
+            # partition_indices=self.random_partition(self.num_partitions, indices)
+            with open("/data-mount-hdd/subsets/fl_bert_12_09_2022_15.35.34/partition_indices_after_step_81140.pkl", "rb") as f:
+                partition_indices=pickle.load(f)
             partition_budgets=[min(math.ceil((len(partition)/len(indices)) * budget), len(partition)-1) for partition in partition_indices]
         elif self.partition_strategy=="kmeans_clustering":
             partition_indices=self.kmeans_partition(self.num_partitions, representations, indices)

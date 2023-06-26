@@ -17,7 +17,7 @@ def partition_subset_strat(args):
         return partition_subset_selection(*args)
     
 def partition_subset_selection(representations, partition_budget, partition_ind, smi_func_type, optimizer, metric, sparse_rep, return_gains):
-    if smi_func_type in ["fl", "logdet", "gc"]:
+    if smi_func_type in ["fl", "logdet", "gc", "disparity-sum"]:
         data_sijs=submodlib.helper.create_kernel(X=representations, metric=metric, method="sklearn")
         # data_sijs=rbf_kernel(representations)
         # dist_mat=euclidean_distances(representations)
@@ -42,11 +42,16 @@ def partition_subset_selection(representations, partition_budget, partition_ind,
                                                 lambdaVal = 1,
                                                 sijs = data_sijs)
     
+    if smi_func_type=="disparity-sum":
+        obj = submodlib.DisparitySumFunction(n = representations.shape[0],
+                                            mode = 'dense',
+                                            sijs = data_sijs)
+    
     greedyList=obj.maximize(budget=partition_budget, optimizer=optimizer, stopIfZeroGain=False, stopIfNegativeGain=False, verbose=False, show_progress=True)
 
     del representations
     del obj
-    if smi_func_type in ["fl", "logdet", "gc"]:
+    if smi_func_type in ["fl", "logdet", "gc", "disparity-sum"]:
         del data_sijs
     #Converting selected indices to global indices
     if return_gains:
