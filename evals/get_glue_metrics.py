@@ -4,7 +4,7 @@ import argparse
 import time
 
 def parse_args():
-    parser=argparse.ArgumentParser(description="superglue")
+    parser=argparse.ArgumentParser(description="GLUE")
     parser.add_argument(
         "--model_dir",
         type=str,
@@ -23,40 +23,44 @@ def parse_args():
         required=True,
         help="gpu number to use"
     )
+    parser.add_argument(
+        "--run",
+        type=int,
+    )
     args=parser.parse_args()
     return args
 
 def main():
     args=parse_args()
-    model_dir=args.model_dir
-    log_dir=model_dir
-    for i in range(5, 21):
-        model_name_or_path=model_dir#+"step_{}/".format(100)
-        if i>5:
-            tasks=["cola", "rte", "mrpc", "stsb"]
+    model_name_or_path=args.model_dir
+    tasks=["cola", "mrpc", "rte", "stsb", "sst2", "qnli", "mnli", "qqp"]
+    tasks=["qnli"]
+    for run in range(1, 21):
+        os.makedirs(os.path.join(model_name_or_path, f"glue_run_{run}"), exist_ok=True)
+    for i, task in enumerate(tasks):
+        if task in ["cola", "mrpc", "rte", "stsb"]:
+            num_runs=20
         else:
-            tasks=["cola", "rte", "mrpc", "stsb", "sst2", "qnli", "mnli", "qqp"]
-        # tasks=["qqp"]
-        glue_log_dir=model_name_or_path+f"glue_run_{i}/"
-        os.makedirs(glue_log_dir, exist_ok=True)
-        for task in tasks:
+            num_runs=5
+        l=[args.run]
+        for run in l:#range(1, num_runs+1):
             os.environ["CUDA_VISIBLE_DEVICES"]=args.visible_gpus
             l=[
                 "accelerate", "launch", "--main_process_port", f"{args.main_process_port}", "run_glue.py",
-                "--log_file", glue_log_dir+task+".log",
+                "--log_file", os.path.join(model_name_or_path, f"glue_run_{run}", f"{task}.log"),
                 "--task_name", task,
                 "--max_length", "128",
                 "--model_name_or_path", model_name_or_path,
                 "--per_device_train_batch_size", "32",
                 "--per_device_eval_batch_size", "32",
                 "--learning_rate", f"5e-5",
-                "--weight_decay" ,"0.0",
+                "--weight_decay" ,"0.0",    
                 "--num_train_epochs", "3",
-                # "--seed", "45646",
-                # "--output_dir", f"{glue_log_dir}{task}/"
+                # "--seed", f"{run}",
             ]
             subprocess.run(l)
-            # time.sleep(60)
+            # wait for half a minute
+            time.sleep(60)
     
 if __name__=="__main__":
     main()

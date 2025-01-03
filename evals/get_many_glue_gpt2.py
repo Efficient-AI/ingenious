@@ -2,10 +2,12 @@ import subprocess
 
 def main():
     main_model_dirs=[
-        "/home/hrenduchinta/LM-pretraining/models/gpt2_random_fixed_13_01_2023_08.07.20"
+        "/data-mount-milaggar-disk/home/hrenduchinta/LM-pretraining/models/gpt2_vanilla_torch",
+        "/data-mount-milaggar-disk/home/hrenduchinta/LM-pretraining/models/gpt2_ingenious_09_01_2023_10.22.38",
     ]
     steps=[
-        [50000, 450000]
+        [100000, 150000, 200000, 250000, 300000, 350000, 400000],
+        [100000, 150000, 200000, 250000, 300000, 350000, 400000]
     ]
     config_files=["config.json", "special_tokens_map.json", "tokenizer_config.json", "tokenizer.json", "vocab.json", "merges.txt"]
     model_dirs=[]
@@ -16,7 +18,7 @@ def main():
                 subprocess.run(["cp", f"{main_model_dir}/{f}", f"{main_model_dir}/step_{step}/{f}"])
     for i, model_dir in enumerate(model_dirs):
         subprocess.Popen(
-            f"nohup python3 get_glue_metrics_gpt2.py --model_dir {model_dir} --main_process_port {55355+i} --visible_gpus {i%8} > ./gluelogs_{i}.txt",
+            f"nohup python3 get_glue_metrics_gpt2.py --model_dir {model_dir} --main_process_port {53355+i} --visible_gpus {(3+i)%8} > ./gpt2_gluelogs_{i}.txt",
             shell=True
         )
     

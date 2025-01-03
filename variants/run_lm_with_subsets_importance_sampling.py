@@ -661,7 +661,7 @@ def main():
     if args.selection_strategy in ['fl', 'logdet', 'gc']:
         subset_strategy = SubmodStrategy(logger, args.selection_strategy,
                                     num_partitions=args.num_partitions, partition_strategy=args.partition_strategy,
-                                    optimizer='LazyGreedy', similarity_criterion='feature', 
+                                    optimizer='LazierThanLazyGreedy', similarity_criterion='feature', 
                                     metric='cosine', eta=1, stopIfZeroGain=False, 
                                     stopIfNegativeGain=False, verbose=False, lambdaVal=1)
     
@@ -812,6 +812,10 @@ def main():
         output_file=os.path.join(args.subset_dir, output_file)
         with open(output_file, "wb") as f:
             pickle.dump(partition_indices, f)
+        output_file=f"greedy_indices_after_step_{completed_steps}.pkl"
+        output_file=os.path.join(args.subset_dir, output_file)
+        with open(output_file, "wb") as f:
+            pickle.dump(greedyIdx, f)
     accelerator.wait_for_everyone()
     subset_dataset = full_dataset.select(init_subset_indices[0])
     subset_dataloader=DataLoader(
